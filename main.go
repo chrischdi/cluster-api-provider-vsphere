@@ -309,6 +309,7 @@ func main() {
 
 	sigHandler := ctrlsig.SetupSignalHandler()
 	setupLog.Info("starting controller manager")
+	setupLog.Info("starting controller manager")
 	if err := mgr.Start(sigHandler); err != nil {
 		setupLog.Error(err, "problem running controller manager")
 		os.Exit(1)
