@@ -244,6 +244,7 @@ func main() {
 	}
 
 	setupLog.V(1).Info(fmt.Sprintf("feature gates: %+v\n", feature.Gates))
+	setupLog.V(1).Info(fmt.Sprintf("feature gates: %+v\n", feature.Gates))
 
 	managerOpts.Cache.SyncPeriod = &syncPeriod
 	managerOpts.LeaseDuration = &leaderElectionLeaseDuration
