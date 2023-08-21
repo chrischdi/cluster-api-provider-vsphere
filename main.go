@@ -298,6 +298,7 @@ func main() {
 	managerOpts.WebhookServer = webhook.NewServer(webhookOpts)
 
 	setupLog.Info("creating controller manager", "version", version.Get().String())
+	setupLog.Info("creating controller manager", "version", version.Get().String())
 	managerOpts.AddToManager = addToManager
 	mgr, err := manager.New(managerOpts)
 	if err != nil {
