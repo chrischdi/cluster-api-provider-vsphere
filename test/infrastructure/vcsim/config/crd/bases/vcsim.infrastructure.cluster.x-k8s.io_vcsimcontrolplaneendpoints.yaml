@@ -1,0 +1,82 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.13.0
+  name: vcsimcontrolplaneendpoints.vcsim.infrastructure.cluster.x-k8s.io
+spec:
+  group: vcsim.infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: VCSimControlPlaneEndpoint
+    listKind: VCSimControlPlaneEndpointList
+    plural: vcsimcontrolplaneendpoints
+    singular: vcsimcontrolplaneendpoint
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: VCSimControlPlaneEndpoint is the schema for a VCenter simulator
+          server.
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: VCSimControlPlaneEndpointSpec defines the desired state of
+              the VCSimControlPlaneEndpoint.
+            type: object
+          status:
+            description: VCSimControlPlaneEndpointClusterStatus defines the observed
+              state of the VCSimControlPlaneEndpoint.
+            properties:
+              envsubst:
+                description: 'The output of a envsubst generator, which is automatically
+                  triggered in order to make it easier to consume the endpoint from
+                  a Cluster API template. NOTE: Cluster API cluster name must be equal
+                  to the control plane endpoint name in order to comply with the assumptions
+                  hard coded in the fake API server implementation.'
+                properties:
+                  clusters:
+                    description: the output of a envsubst generator for each Cluster
+                      API cluster.
+                    items:
+                      description: ClusterEnvVars defines the output of a envsubst
+                        generator for a specific Cluster API cluster.
+                      properties:
+                        name:
+                          description: name of the Cluster API cluster.
+                          type: string
+                        variables:
+                          additionalProperties:
+                            type: string
+                          description: variables to use with envsubst when creating
+                            the Cluster API cluster.
+                          type: object
+                      type: object
+                    type: array
+                type: object
+              host:
+                description: The control plane host.
+                type: string
+              port:
+                description: The control plane port.
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

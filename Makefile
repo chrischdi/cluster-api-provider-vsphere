@@ -227,8 +227,10 @@ MANIFEST_ROOT ?= ./config
 CRD_ROOT ?= $(MANIFEST_ROOT)/default/crd/bases
 SUPERVISOR_CRD_ROOT ?= $(MANIFEST_ROOT)/supervisor/crd
 VMOP_CRD_ROOT ?= $(MANIFEST_ROOT)/deployments/integration-tests/crds
+VCSIM_CRD_ROOT ?= test/infrastructure/vcsim/config/crd/bases
 WEBHOOK_ROOT ?= $(MANIFEST_ROOT)/webhook
 RBAC_ROOT ?= $(MANIFEST_ROOT)/rbac
+VCSIM_RBAC_ROOT ?= test/infrastructure/vcsim/config/rbac
 VERSION ?= $(shell cat clusterctl-settings.json | jq .config.nextVersion -r)
 OVERRIDES_DIR := $(HOME)/.cluster-api/overrides/infrastructure-vsphere/$(VERSION)
 
@@ -269,6 +271,15 @@ generate-manifests: $(CONTROLLER_GEN) ## Generate manifests e.g. CRD, RBAC etc.
 		paths=github.com/vmware-tanzu/vm-operator/api/v1alpha1/... \
 		crd:crdVersions=v1 \
 		output:crd:dir=$(VMOP_CRD_ROOT)
+	# vcsim crds are used for tests.
+	$(CONTROLLER_GEN) \
+    		paths=./test/infrastructure/vcsim/api/v1alpha1 \
+    		crd:crdVersions=v1 \
+    		output:crd:dir=$(VCSIM_CRD_ROOT)
+	$(CONTROLLER_GEN) \
+		paths=./test/infrastructure/vcsim/controllers/... \
+		output:rbac:dir=$(VCSIM_RBAC_ROOT) \
+		rbac:roleName=manager-role
 
 .PHONY: generate-go-deepcopy
 generate-go-deepcopy: $(CONTROLLER_GEN) ## Generate deepcopy go code for core
@@ -276,6 +287,9 @@ generate-go-deepcopy: $(CONTROLLER_GEN) ## Generate deepcopy go code for core
 	$(CONTROLLER_GEN) \
 		object:headerFile=./hack/boilerplate/boilerplate.generatego.txt \
 		paths=./apis/...
+	$(CONTROLLER_GEN) \
+    		object:headerFile=./hack/boilerplate/boilerplate.generatego.txt \
+    		paths=./test/infrastructure/vcsim/api/...
 
 .PHONY: generate-modules
 generate-modules: ## Run go mod tidy to ensure modules are up to date

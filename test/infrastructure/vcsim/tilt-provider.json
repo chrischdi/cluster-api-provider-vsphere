@@ -1,0 +1,14 @@
+{
+  "name": "vspheresim",
+  "config": {
+    "version": "v1.9.99",
+    "image": "gcr.io/k8s-staging-cluster-api/capvsim-manager",
+    "live_reload_deps": [
+      "main.go",
+      "api",
+      "controllers",
+      "server"
+    ],
+    "label": "CAPVSIM"
+  }
+}
