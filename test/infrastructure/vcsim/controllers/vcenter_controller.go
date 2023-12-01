@@ -51,7 +51,7 @@ import (
 	vcsimv1 "sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/api/v1alpha1"
 )
 
-type VCSimServerReconciler struct {
+type VCenterReconciler struct {
 	Client client.Client
 	PodIp  string
 
@@ -63,15 +63,15 @@ type VCSimServerReconciler struct {
 	WatchFilterValue string
 }
 
-// +kubebuilder:rbac:groups=vcsim.infrastructure.cluster.x-k8s.io,resources=vcsimservers,verbs=get;list;watch;patch
-// +kubebuilder:rbac:groups=vcsim.infrastructure.cluster.x-k8s.io,resources=vcsimservers/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=vcsim.infrastructure.cluster.x-k8s.io,resources=vcenters,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=vcsim.infrastructure.cluster.x-k8s.io,resources=vcenters/status,verbs=get;update;patch
 
-func (r *VCSimServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
+func (r *VCenterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
 	log := ctrl.LoggerFrom(ctx)
 
-	// Fetch the VCSimServer instance
-	vcSimServer := &vcsimv1.VCSimServer{}
-	if err := r.Client.Get(ctx, req.NamespacedName, vcSimServer); err != nil {
+	// Fetch the VCenter instance
+	vCenter := &vcsimv1.VCenter{}
+	if err := r.Client.Get(ctx, req.NamespacedName, vCenter); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
@@ -79,15 +79,15 @@ func (r *VCSimServerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Initialize the patch helper
-	patchHelper, err := patch.NewHelper(vcSimServer, r.Client)
+	patchHelper, err := patch.NewHelper(vCenter, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Always attempt to Patch the VCSimServer object and status after each reconciliation.
+	// Always attempt to Patch the VCenter object and status after each reconciliation.
 	defer func() {
-		if err := patchHelper.Patch(ctx, vcSimServer); err != nil {
-			log.Error(err, "failed to patch VCSimServer")
+		if err := patchHelper.Patch(ctx, vCenter); err != nil {
+			log.Error(err, "failed to patch VCenter")
 			if reterr == nil {
 				reterr = err
 			}
@@ -95,22 +95,22 @@ func (r *VCSimServerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}()
 
 	// Handle deleted machines
-	if !vcSimServer.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, vcSimServer)
+	if !vCenter.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, vCenter)
 	}
 
 	// Add finalizer first if not set to avoid the race condition between init and delete.
 	// Note: Finalizers in general can only be added when the deletionTimestamp is not set.
-	if !controllerutil.ContainsFinalizer(vcSimServer, vcsimv1.VCSimServerFinalizer) {
-		controllerutil.AddFinalizer(vcSimServer, vcsimv1.VCSimServerFinalizer)
+	if !controllerutil.ContainsFinalizer(vCenter, vcsimv1.VCenterFinalizer) {
+		controllerutil.AddFinalizer(vCenter, vcsimv1.VCenterFinalizer)
 		return ctrl.Result{}, nil
 	}
 
 	// Handle non-deleted machines
-	return r.reconcileNormal(ctx, vcSimServer)
+	return r.reconcileNormal(ctx, vCenter)
 }
 
-func (r *VCSimServerReconciler) reconcileNormal(ctx context.Context, vcSimServer *vcsimv1.VCSimServer) (ctrl.Result, error) {
+func (r *VCenterReconciler) reconcileNormal(ctx context.Context, vCenter *vcsimv1.VCenter) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	log.Info("Reconciling VCSim Server")
 
@@ -126,7 +126,7 @@ func (r *VCSimServerReconciler) reconcileNormal(ctx context.Context, vcSimServer
 		r.sshKeys = map[string]string{}
 	}
 
-	key := klog.KObj(vcSimServer).String()
+	key := klog.KObj(vCenter).String()
 
 	sshKey, ok := r.sshKeys[key]
 	if !ok {
@@ -155,13 +155,13 @@ func (r *VCSimServerReconciler) reconcileNormal(ctx context.Context, vcSimServer
 		// in order to register the endpoint for handling request about storage policies.
 		model := simulator.VPX()
 		model.ServiceContent.About.Version = "7.0.0" // TODO: consider if to change other fields for version 7.0.0 (same inside the if for custom version)
-		if vcSimServer.Spec.Model != nil {
-			model.ServiceContent.About.Version = pointer.StringDeref(vcSimServer.Spec.Model.VSphereVersion, model.ServiceContent.About.Version)
-			model.Datacenter = pointer.IntDeref(vcSimServer.Spec.Model.Datacenter, model.Datacenter)
-			model.Cluster = pointer.IntDeref(vcSimServer.Spec.Model.Cluster, model.Cluster)
-			model.ClusterHost = pointer.IntDeref(vcSimServer.Spec.Model.ClusterHost, model.ClusterHost)
-			model.Pool = pointer.IntDeref(vcSimServer.Spec.Model.Pool, model.Pool)
-			model.Datastore = pointer.IntDeref(vcSimServer.Spec.Model.Datastore, model.Datastore)
+		if vCenter.Spec.Model != nil {
+			model.ServiceContent.About.Version = pointer.StringDeref(vCenter.Spec.Model.VSphereVersion, model.ServiceContent.About.Version)
+			model.Datacenter = pointer.IntDeref(vCenter.Spec.Model.Datacenter, model.Datacenter)
+			model.Cluster = pointer.IntDeref(vCenter.Spec.Model.Cluster, model.Cluster)
+			model.ClusterHost = pointer.IntDeref(vCenter.Spec.Model.ClusterHost, model.ClusterHost)
+			model.Pool = pointer.IntDeref(vCenter.Spec.Model.Pool, model.Pool)
+			model.Datastore = pointer.IntDeref(vCenter.Spec.Model.Datastore, model.Datastore)
 		}
 		if err := model.Create(); err != nil {
 			return ctrl.Result{}, errors.Wrapf(err, "failed to create VCSim Server model")
@@ -169,14 +169,14 @@ func (r *VCSimServerReconciler) reconcileNormal(ctx context.Context, vcSimServer
 		model.Service.RegisterSDK(pbmsimulator.New())
 
 		// Compute the vcsim URL, binding all interfaces interface (so it will be accessible both from outside and via kubectl port-forward);
-		// a random port will be used unless we are reconciling a previously existing vcSimServer after a restart;
+		// a random port will be used unless we are reconciling a previously existing vCenter after a restart;
 		// in case of restart it will try to re-use the port previously assigned, but the internal status of vcsim will be lost.
 		// NOTE: re-using the same port might be racy with other vcsimURL being created using a random port,
 		// but we consider this risk acceptable for testing purposes.
 		host := "0.0.0.0"
 		port := "0"
-		if vcSimServer.Status.Host != "" {
-			_, port, _ = net.SplitHostPort(vcSimServer.Status.Host)
+		if vCenter.Status.Host != "" {
+			_, port, _ = net.SplitHostPort(vCenter.Status.Host)
 		}
 		vcsimURL, err := url.Parse(fmt.Sprintf("https://%s", net.JoinHostPort(host, port)))
 		if err != nil {
@@ -196,19 +196,19 @@ func (r *VCSimServerReconciler) reconcileNormal(ctx context.Context, vcSimServer
 		r.vcsimInstances[key] = vcsimInstance
 		log.Info("Created VCSim Server", "url", vcsimInstance.ServerURL())
 
-		vcSimServer.Status.Host = vcsimInstance.ServerURL().Host
-		vcSimServer.Status.Username = vcsimInstance.Username()
-		vcSimServer.Status.Password = vcsimInstance.Password()
+		vCenter.Status.Host = vcsimInstance.ServerURL().Host
+		vCenter.Status.Username = vcsimInstance.Username()
+		vCenter.Status.Password = vcsimInstance.Password()
 
 		// Add a VM template
 
 		// TODO: figure this out better.
 		//  we create a template in a datastore, what if many?
 		//  we create a template in a datacenter, cluster, but the vm doesn't have the cluster in the path. What if I have many clusters?
-		govcURL := fmt.Sprintf("https://%s:%s@%s/sdk", vcSimServer.Status.Username, vcSimServer.Status.Password, vcSimServer.Status.Host)
+		govcURL := fmt.Sprintf("https://%s:%s@%s/sdk", vCenter.Status.Username, vCenter.Status.Password, vCenter.Status.Host)
 		datacenters := 1
-		if vcSimServer.Spec.Model != nil {
-			datacenters = pointer.IntDeref(vcSimServer.Spec.Model.Datacenter, model.Datacenter)
+		if vCenter.Spec.Model != nil {
+			datacenters = pointer.IntDeref(vCenter.Spec.Model.Datacenter, model.Datacenter)
 		}
 		for dc := 0; dc < datacenters; dc++ {
 			exit := cli.Run([]string{"vm.create", "-ds=LocalDS_0", fmt.Sprintf("-cluster=DC%d_C0", dc), "-net=VM Network", "-disk=20G", "-on=false", "-k=true", fmt.Sprintf("-u=%s", govcURL), "ubuntu-2204-kube-vX"})
@@ -224,9 +224,9 @@ func (r *VCSimServerReconciler) reconcileNormal(ctx context.Context, vcSimServer
 		}
 	}
 
-	if vcSimServer.Status.Thumbprint == "" {
+	if vCenter.Status.Thumbprint == "" {
 		config := &tls.Config{InsecureSkipVerify: true}
-		addr := vcSimServer.Status.Host
+		addr := vCenter.Status.Host
 		conn, err := tls.Dial("tcp", addr, config)
 		if err != nil {
 			return ctrl.Result{}, errors.Wrapf(err, "failed to connect to VCSim Server instance to infert thumbprint")
@@ -234,7 +234,7 @@ func (r *VCSimServerReconciler) reconcileNormal(ctx context.Context, vcSimServer
 		defer conn.Close()
 
 		cert := conn.ConnectionState().PeerCertificates[0]
-		vcSimServer.Status.Thumbprint = ThumbprintSHA1(cert)
+		vCenter.Status.Thumbprint = ThumbprintSHA1(cert)
 	}
 
 	clusters := []vcsimv1.ClusterEnvSubstGeneratorSpec{
@@ -242,20 +242,20 @@ func (r *VCSimServerReconciler) reconcileNormal(ctx context.Context, vcSimServer
 			Name: "*",
 		},
 	}
-	if vcSimServer.Spec.Generators.EnvSubst != nil {
-		clusters = append(clusters, vcSimServer.Spec.Generators.EnvSubst.Clusters...)
+	if vCenter.Spec.Generators.EnvSubst != nil {
+		clusters = append(clusters, vCenter.Spec.Generators.EnvSubst.Clusters...)
 	}
 
-	vcSimServer.Status.EnvSubst.Clusters = make([]vcsimv1.ClusterEnvVars, len(clusters))
+	vCenter.Status.EnvSubst.Clusters = make([]vcsimv1.ClusterEnvVars, len(clusters))
 	for i, cluster := range clusters {
 		clusterEnvVars := vcsimv1.ClusterEnvVars{
 			Name: cluster.Name,
 			Variables: map[string]string{
 				// cluster template variables about the vcsim instance.
-				"VSPHERE_SERVER":             fmt.Sprintf("https://%s", vcSimServer.Status.Host),
-				"VSPHERE_PASSWORD":           vcSimServer.Status.Password,
-				"VSPHERE_USERNAME":           vcSimServer.Status.Username,
-				"VSPHERE_TLS_THUMBPRINT":     vcSimServer.Status.Thumbprint,
+				"VSPHERE_SERVER":             fmt.Sprintf("https://%s", vCenter.Status.Host),
+				"VSPHERE_PASSWORD":           vCenter.Status.Password,
+				"VSPHERE_USERNAME":           vCenter.Status.Username,
+				"VSPHERE_TLS_THUMBPRINT":     vCenter.Status.Thumbprint,
 				"VSPHERE_DATACENTER":         fmt.Sprintf("DC%d", pointer.IntDeref(cluster.Datacenter, 0)),
 				"VSPHERE_DATASTORE":          fmt.Sprintf("LocalDS_%d", pointer.IntDeref(cluster.Datastore, 0)),
 				"VSPHERE_FOLDER":             fmt.Sprintf("/DC%d/vm", pointer.IntDeref(cluster.Datacenter, 0)),                                                               // this is the default folder that gets created. TODO: consider if to make it possible to create more (this requires changes to the API)
@@ -266,31 +266,31 @@ func (r *VCSimServerReconciler) reconcileNormal(ctx context.Context, vcSimServer
 				"VSPHERE_SSH_AUTHORIZED_KEY": sshKey,
 
 				// other variables required by the cluster template.
-				"NAMESPACE":                   vcSimServer.Namespace,
+				"NAMESPACE":                   vCenter.Namespace,
 				"CLUSTER_NAME":                cluster.Name,
 				"KUBERNETES_VERSION":          pointer.StringDeref(cluster.KubernetesVersion, "v1.28.0"),
 				"CONTROL_PLANE_MACHINE_COUNT": strconv.Itoa(pointer.IntDeref(cluster.ControlPlaneMachines, 1)),
 				"WORKER_MACHINE_COUNT":        strconv.Itoa(pointer.IntDeref(cluster.WorkerMachines, 1)),
 
 				// variables to set up govc for working with the vcsim instance.
-				"GOVC_URL":      fmt.Sprintf("https://%s:%s@%s/sdk", vcSimServer.Status.Username, vcSimServer.Status.Password, strings.Replace(vcSimServer.Status.Host, r.PodIp, "127.0.0.1", 1)), // NOTE: reverting back to local host because the assumption is that the vcsim pod will be port-forwarded on local host
+				"GOVC_URL":      fmt.Sprintf("https://%s:%s@%s/sdk", vCenter.Status.Username, vCenter.Status.Password, strings.Replace(vCenter.Status.Host, r.PodIp, "127.0.0.1", 1)), // NOTE: reverting back to local host because the assumption is that the vcsim pod will be port-forwarded on local host
 				"GOVC_INSECURE": "true",
 			},
 		}
-		vcSimServer.Status.EnvSubst.Clusters[i] = clusterEnvVars
+		vCenter.Status.EnvSubst.Clusters[i] = clusterEnvVars
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *VCSimServerReconciler) reconcileDelete(ctx context.Context, vcSimServer *vcsimv1.VCSimServer) (ctrl.Result, error) {
+func (r *VCenterReconciler) reconcileDelete(ctx context.Context, vCenter *vcsimv1.VCenter) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	log.Info("Reconciling delete VCSim Server")
 
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	key := klog.KObj(vcSimServer).String()
+	key := klog.KObj(vCenter).String()
 	vcsimInstance, ok := r.vcsimInstances[key]
 	if ok {
 		log.Info("Deleting VCSim Server")
@@ -298,15 +298,15 @@ func (r *VCSimServerReconciler) reconcileDelete(ctx context.Context, vcSimServer
 		delete(r.vcsimInstances, key)
 	}
 
-	controllerutil.RemoveFinalizer(vcSimServer, vcsimv1.VCSimServerFinalizer)
+	controllerutil.RemoveFinalizer(vCenter, vcsimv1.VCenterFinalizer)
 
 	return ctrl.Result{}, nil
 }
 
 // SetupWithManager will add watches for this controller.
-func (r *VCSimServerReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
+func (r *VCenterReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
 	err := ctrl.NewControllerManagedBy(mgr).
-		For(&vcsimv1.VCSimServer{}).
+		For(&vcsimv1.VCenter{}).
 		WithOptions(options).
 		WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue)).
 		Complete(r)

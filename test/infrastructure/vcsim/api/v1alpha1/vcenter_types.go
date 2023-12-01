@@ -21,18 +21,18 @@ import (
 )
 
 const (
-	// VCSimServerFinalizer allows VCSimServerReconciler to clean up resources associated with VCSimServer before
+	// VCenterFinalizer allows VCenterReconciler to clean up resources associated with VCenter before
 	// removing it from the API server.
-	VCSimServerFinalizer = "server.vcsim.infrastructure.cluster.x-k8s.io"
+	VCenterFinalizer = "vcenter.vcsim.infrastructure.cluster.x-k8s.io"
 )
 
-// VCSimServerSpec defines the desired state of the VCSimServer.
-type VCSimServerSpec struct {
+// VCCenterSpec defines the desired state of the VCenter.
+type VCCenterSpec struct {
 	Model      *VCSimModelSpec `json:"model,omitempty"`
 	Generators GeneratorsSpec  `json:"generators,omitempty"`
 }
 
-// VCSimModelSpec defines the model to be used by the VCSimServer.
+// VCSimModelSpec defines the model to be used by the VCenter.
 type VCSimModelSpec struct {
 	// VSphereVersion specifies the VSphere version to use
 	// Default: 7.0.0
@@ -124,8 +124,8 @@ type ClusterEnvSubstGeneratorSpec struct {
 	// TODO: model pool selection; if not specified, root ResourcePool named "Resources" will be used
 }
 
-// VCSimServerStatus defines the observed state of the VCSimServer.
-type VCSimServerStatus struct {
+// VCenterStatus defines the observed state of the VCenter.
+type VCenterStatus struct {
 	// The vcsim server  url's host.
 	Host string `json:"host,omitempty"`
 
@@ -157,29 +157,29 @@ type ClusterEnvVars struct {
 	Variables map[string]string `json:"variables,omitempty"`
 }
 
-// +kubebuilder:resource:path=vcsimservers,scope=Namespaced,categories=cluster-api
+// +kubebuilder:resource:path=vcenters,scope=Namespaced,categories=cluster-api
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
 // +kubebuilder:object:root=true
 
-// VCSimServer is the schema for a VCenter simulator server.
-type VCSimServer struct {
+// VCenter is the schema for a VCenter simulator server.
+type VCenter struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   VCSimServerSpec   `json:"spec,omitempty"`
-	Status VCSimServerStatus `json:"status,omitempty"`
+	Spec   VCCenterSpec  `json:"spec,omitempty"`
+	Status VCenterStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// VCSimServerList contains a list of VCSimServer.
-type VCSimServerList struct {
+// VCenterList contains a list of VCenter.
+type VCenterList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []VCSimServer `json:"items"`
+	Items           []VCenter `json:"items"`
 }
 
 func init() {
-	objectTypes = append(objectTypes, &VCSimServer{}, &VCSimServerList{})
+	objectTypes = append(objectTypes, &VCenter{}, &VCenterList{})
 }

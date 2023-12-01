@@ -283,23 +283,23 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 	}
 
 	// Setup reconcilers
-	if err := (&controllers.VCSimServerReconciler{
+	if err := (&controllers.VCenterReconciler{
 		Client:           mgr.GetClient(),
 		PodIp:            podIP,
 		WatchFilterValue: watchFilterValue,
 	}).SetupWithManager(ctx, mgr, concurrency(serverConcurrency)); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "VCSimServerReconciler")
+		setupLog.Error(err, "unable to create controller", "controller", "VCenterReconciler")
 		os.Exit(1)
 	}
 
-	if err := (&controllers.VCSimControlPlaneEndpointReconciler{
+	if err := (&controllers.FakeAPIServerEndpointReconciler{
 		Client:           mgr.GetClient(),
 		CloudManager:     cloudMgr,
 		APIServerMux:     apiServerMux,
 		PodIp:            podIP,
 		WatchFilterValue: watchFilterValue,
 	}).SetupWithManager(ctx, mgr, concurrency(controlPlaneConcurrency)); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "VCSimControlPlaneEndpointReconciler")
+		setupLog.Error(err, "unable to create controller", "controller", "FakeAPIServerEndpointReconciler")
 		os.Exit(1)
 	}
 

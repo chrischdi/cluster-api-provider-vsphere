@@ -50,42 +50,42 @@ func Test_Reconcile_ControlPlaneEndpoint(t *testing.T) {
 	})
 	g.Expect(err).ToNot(HaveOccurred())
 
-	vcSimControlPlaneEndpoint := &vcsimv1.VCSimControlPlaneEndpoint{
+	fakeAPIServerEndpoint := &vcsimv1.FakeAPIServerEndpoint{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: metav1.NamespaceDefault,
 			Name:      "foo",
 			Finalizers: []string{
-				vcsimv1.VCSimControlPlaneEndpointFinalizer, // Adding this to move past the first reconcile
+				vcsimv1.FakeAPIServerEndpointFinalizer, // Adding this to move past the first reconcile
 			},
 		},
 	}
 
-	crclient := fake.NewClientBuilder().WithObjects(vcSimControlPlaneEndpoint).WithStatusSubresource(vcSimControlPlaneEndpoint).WithScheme(scheme).Build()
-	r := &VCSimControlPlaneEndpointReconciler{
+	crclient := fake.NewClientBuilder().WithObjects(fakeAPIServerEndpoint).WithStatusSubresource(fakeAPIServerEndpoint).WithScheme(scheme).Build()
+	r := &FakeAPIServerEndpointReconciler{
 		Client:       crclient,
 		CloudManager: workloadClustersManager,
 		APIServerMux: workloadClustersMux,
 		PodIp:        podIP,
 	}
 
-	// PART 1: Should create a new VCSimControlPlaneEndpoint
+	// PART 1: Should create a new FakeAPIServerEndpoint
 
 	res, err := r.Reconcile(ctx, ctrl.Request{types.NamespacedName{
-		Namespace: vcSimControlPlaneEndpoint.Namespace,
-		Name:      vcSimControlPlaneEndpoint.Name,
+		Namespace: fakeAPIServerEndpoint.Namespace,
+		Name:      fakeAPIServerEndpoint.Name,
 	}})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res).To(Equal(ctrl.Result{}))
 
 	// Gets the reconciled object
-	err = crclient.Get(ctx, client.ObjectKeyFromObject(vcSimControlPlaneEndpoint), vcSimControlPlaneEndpoint)
+	err = crclient.Get(ctx, client.ObjectKeyFromObject(fakeAPIServerEndpoint), fakeAPIServerEndpoint)
 	g.Expect(err).ToNot(HaveOccurred())
 
-	g.Expect(vcSimControlPlaneEndpoint.Status.Host).ToNot(BeEmpty())
-	g.Expect(vcSimControlPlaneEndpoint.Status.Port).ToNot(BeZero())
+	g.Expect(fakeAPIServerEndpoint.Status.Host).ToNot(BeEmpty())
+	g.Expect(fakeAPIServerEndpoint.Status.Port).ToNot(BeZero())
 
 	// Check manager and server internal status
-	resourceGroup := klog.KObj(vcSimControlPlaneEndpoint).String()
+	resourceGroup := klog.KObj(fakeAPIServerEndpoint).String()
 	foo := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "foo",
@@ -94,13 +94,13 @@ func Test_Reconcile_ControlPlaneEndpoint(t *testing.T) {
 	g.Expect(workloadClustersManager.GetResourceGroup(resourceGroup).GetClient().Create(ctx, foo)).To(Succeed()) // the operation succeed if the resource group has been created as expected
 	g.Expect(workloadClustersMux.ListListeners()).To(HaveKey(resourceGroup))
 
-	// PART 2: Should delete a VCSimControlPlaneEndpoint
+	// PART 2: Should delete a FakeAPIServerEndpoint
 
-	err = crclient.Delete(ctx, vcSimControlPlaneEndpoint)
+	err = crclient.Delete(ctx, fakeAPIServerEndpoint)
 
 	res, err = r.Reconcile(ctx, ctrl.Request{types.NamespacedName{
-		Namespace: vcSimControlPlaneEndpoint.Namespace,
-		Name:      vcSimControlPlaneEndpoint.Name,
+		Namespace: fakeAPIServerEndpoint.Namespace,
+		Name:      fakeAPIServerEndpoint.Name,
 	}})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res).To(Equal(ctrl.Result{}))

@@ -4,22 +4,22 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.13.0
-  name: vcsimservers.vcsim.infrastructure.cluster.x-k8s.io
+  name: vcenters.vcsim.infrastructure.cluster.x-k8s.io
 spec:
   group: vcsim.infrastructure.cluster.x-k8s.io
   names:
     categories:
     - cluster-api
-    kind: VCSimServer
-    listKind: VCSimServerList
-    plural: vcsimservers
-    singular: vcsimserver
+    kind: VCenter
+    listKind: VCenterList
+    plural: vcenters
+    singular: vcenter
   scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: VCSimServer is the schema for a VCenter simulator server.
+        description: VCenter is the schema for a VCenter simulator server.
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -34,7 +34,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: VCSimServerSpec defines the desired state of the VCSimServer.
+            description: VCCenterSpec defines the desired state of the VCenter.
             properties:
               generators:
                 description: GeneratorsSpec defines the spec for generators.
@@ -95,7 +95,7 @@ spec:
                     type: object
                 type: object
               model:
-                description: VCSimModelSpec defines the model to be used by the VCSimServer.
+                description: VCSimModelSpec defines the model to be used by the VCenter.
                 properties:
                   cluster:
                     description: 'Cluster specifies the number of ClusterComputeResource
@@ -134,7 +134,7 @@ spec:
                 type: object
             type: object
           status:
-            description: VCSimServerStatus defines the observed state of the VCSimServer.
+            description: VCenterStatus defines the observed state of the VCenter.
             properties:
               envsubst:
                 description: The output of a envsubst generator.

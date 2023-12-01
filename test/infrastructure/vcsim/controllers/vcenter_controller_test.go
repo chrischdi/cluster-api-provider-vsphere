@@ -42,54 +42,54 @@ import (
 func Test_Reconcile_Server(t *testing.T) {
 	g := NewWithT(t)
 
-	vcSimServer := &vcsimv1.VCSimServer{
+	vCenter := &vcsimv1.VCenter{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: metav1.NamespaceDefault,
 			Name:      "foo",
 			Finalizers: []string{
-				vcsimv1.VCSimServerFinalizer, // Adding this to move past the first reconcile
+				vcsimv1.VCenterFinalizer, // Adding this to move past the first reconcile
 			},
 		},
-		Spec: vcsimv1.VCSimServerSpec{},
+		Spec: vcsimv1.VCCenterSpec{},
 	}
 
-	crclient := fake.NewClientBuilder().WithObjects(vcSimServer).WithStatusSubresource(vcSimServer).WithScheme(scheme).Build()
-	r := &VCSimServerReconciler{
+	crclient := fake.NewClientBuilder().WithObjects(vCenter).WithStatusSubresource(vCenter).WithScheme(scheme).Build()
+	r := &VCenterReconciler{
 		Client: crclient,
 		PodIp:  "127.0.0.1",
 	}
 
-	// PART 1: Should create a new VCSimServer
+	// PART 1: Should create a new VCenter
 
 	res, err := r.Reconcile(ctx, ctrl.Request{types.NamespacedName{
-		Namespace: vcSimServer.Namespace,
-		Name:      vcSimServer.Name,
+		Namespace: vCenter.Namespace,
+		Name:      vCenter.Name,
 	}})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res).To(Equal(ctrl.Result{}))
 
-	// Check the VCSimServer instance has been created in the reconciler internal status
+	// Check the VCenter instance has been created in the reconciler internal status
 	func() {
 		r.lock.RLock()
 		defer r.lock.RUnlock()
 
-		key := klog.KObj(vcSimServer).String()
+		key := klog.KObj(vCenter).String()
 		g.Expect(r.vcsimInstances).To(HaveKey(key))
 		g.Expect(r.vcsimInstances[key]).ToNot(BeNil())
 	}()
 
-	// Gets the reconciled object and tests if the VCSimServer instance actually works
-	err = crclient.Get(ctx, client.ObjectKeyFromObject(vcSimServer), vcSimServer)
+	// Gets the reconciled object and tests if the VCenter instance actually works
+	err = crclient.Get(ctx, client.ObjectKeyFromObject(vCenter), vCenter)
 	g.Expect(err).ToNot(HaveOccurred())
 
-	g.Expect(vcSimServer.Status.Host).ToNot(BeEmpty())
-	g.Expect(vcSimServer.Status.Username).ToNot(BeEmpty())
-	g.Expect(vcSimServer.Status.Password).ToNot(BeEmpty())
+	g.Expect(vCenter.Status.Host).ToNot(BeEmpty())
+	g.Expect(vCenter.Status.Username).ToNot(BeEmpty())
+	g.Expect(vCenter.Status.Password).ToNot(BeEmpty())
 
 	params := session.NewParams().
-		WithServer(fmt.Sprintf("https://%s", strings.Replace(vcSimServer.Status.Host, r.PodIp, "127.0.0.1", 1))). // TODO: use govc address
-		WithThumbprint(vcSimServer.Status.Thumbprint).
-		WithUserInfo(vcSimServer.Status.Username, vcSimServer.Status.Password)
+		WithServer(fmt.Sprintf("https://%s", strings.Replace(vCenter.Status.Host, r.PodIp, "127.0.0.1", 1))). // TODO: use govc address
+		WithThumbprint(vCenter.Status.Thumbprint).
+		WithUserInfo(vCenter.Status.Username, vCenter.Status.Password)
 
 	s, err := session.GetOrCreate(ctx, params)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -102,22 +102,22 @@ func Test_Reconcile_Server(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(dc).ToNot(BeNil())
 
-	// PART 2: Should delete a VCSimServer
-	err = crclient.Delete(ctx, vcSimServer)
+	// PART 2: Should delete a VCenter
+	err = crclient.Delete(ctx, vCenter)
 
 	res, err = r.Reconcile(ctx, ctrl.Request{types.NamespacedName{
-		Namespace: vcSimServer.Namespace,
-		Name:      vcSimServer.Name,
+		Namespace: vCenter.Namespace,
+		Name:      vCenter.Name,
 	}})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res).To(Equal(ctrl.Result{}))
 
-	// Check the VCSimServer instance has been created in the reconciler internal status
+	// Check the VCenter instance has been created in the reconciler internal status
 	func() {
 		r.lock.RLock()
 		defer r.lock.RUnlock()
 
-		key := klog.KObj(vcSimServer).String()
+		key := klog.KObj(vCenter).String()
 		g.Expect(r.vcsimInstances).ToNot(HaveKey(key))
 	}()
 }
@@ -125,40 +125,40 @@ func Test_Reconcile_Server(t *testing.T) {
 func Test_govmomi_fix(t *testing.T) {
 	g := NewWithT(t)
 
-	vcSimServer := &vcsimv1.VCSimServer{
+	vCenter := &vcsimv1.VCenter{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: metav1.NamespaceDefault,
 			Name:      "foo",
 			Finalizers: []string{
-				vcsimv1.VCSimServerFinalizer, // Adding this to move past the first reconcile
+				vcsimv1.VCenterFinalizer, // Adding this to move past the first reconcile
 			},
 		},
-		Spec: vcsimv1.VCSimServerSpec{},
+		Spec: vcsimv1.VCCenterSpec{},
 	}
 
-	crclient := fake.NewClientBuilder().WithObjects(vcSimServer).WithStatusSubresource(vcSimServer).WithScheme(scheme).Build()
-	r := &VCSimServerReconciler{
+	crclient := fake.NewClientBuilder().WithObjects(vCenter).WithStatusSubresource(vCenter).WithScheme(scheme).Build()
+	r := &VCenterReconciler{
 		Client: crclient,
 		PodIp:  "127.0.0.1",
 	}
 
-	// PART 1: Should create a new VCSimServer
+	// PART 1: Should create a new VCenter
 
 	res, err := r.Reconcile(ctx, ctrl.Request{types.NamespacedName{
-		Namespace: vcSimServer.Namespace,
-		Name:      vcSimServer.Name,
+		Namespace: vCenter.Namespace,
+		Name:      vCenter.Name,
 	}})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res).To(Equal(ctrl.Result{}))
 
-	// Gets the reconciled object and tests if the VCSimServer instance actually works
-	err = crclient.Get(ctx, client.ObjectKeyFromObject(vcSimServer), vcSimServer)
+	// Gets the reconciled object and tests if the VCenter instance actually works
+	err = crclient.Get(ctx, client.ObjectKeyFromObject(vCenter), vCenter)
 	g.Expect(err).ToNot(HaveOccurred())
 
 	params := session.NewParams().
-		WithServer(fmt.Sprintf("https://%s", strings.Replace(vcSimServer.Status.Host, r.PodIp, "127.0.0.1", 1))). // TODO: use govc address
-		WithThumbprint(vcSimServer.Status.Thumbprint).
-		WithUserInfo(vcSimServer.Status.Username, vcSimServer.Status.Password)
+		WithServer(fmt.Sprintf("https://%s", strings.Replace(vCenter.Status.Host, r.PodIp, "127.0.0.1", 1))). // TODO: use govc address
+		WithThumbprint(vCenter.Status.Thumbprint).
+		WithUserInfo(vCenter.Status.Username, vCenter.Status.Password)
 
 	s, err := session.GetOrCreate(ctx, params)
 	g.Expect(err).ToNot(HaveOccurred())
