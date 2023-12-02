@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"path"
 	"testing"
+	"time"
 
 	. "github.com/onsi/gomega"
 	"github.com/vmware/govmomi/object"
@@ -171,7 +172,7 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 		c := conditions.Get(mirrorVSphereVM, NodeProvisionedCondition)
 		g.Expect(c.Status).To(Equal(corev1.ConditionFalse))
 		g.Expect(c.Severity).To(Equal(clusterv1.ConditionSeverityInfo))
-		g.Expect(c.Reason).To(Equal(NodeWaitingForInfrastructureReadyReason))
+		g.Expect(c.Reason).To(Equal(WaitingForVMInfrastructureReason))
 	})
 
 	t.Run("VSphereMachine provisioned gets a node (worker)", func(t *testing.T) {
@@ -254,6 +255,12 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 					VMFinalizer, // Adding this to move past the first reconcile
 				},
 			},
+			Spec: infrav1.VSphereVMSpec{
+				BiosUUID: "foo", // This unblocks provisioning of node
+			},
+			Status: infrav1.VSphereVMStatus{
+				Ready: true, // This unblocks provisioning of node
+			},
 		}
 
 		// Controller runtime client
@@ -278,6 +285,8 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 		}
 
 		// Reconcile
+		nodeStartupDuration = 0 * time.Second
+
 		res, err := r.Reconcile(ctx, ctrl.Request{types.NamespacedName{
 			Namespace: vSphereVM.Namespace,
 			Name:      vSphereVM.Name,
@@ -286,7 +295,6 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 		g.Expect(res).To(Equal(ctrl.Result{}))
 
 		// Check the mirrorVSphereMachine reports all provisioned
-		// TODO: check things actually exists, server started etc.
 
 		mirrorVSphereVM := &infrav1.VSphereVM{}
 		err = cloudClient.Get(ctx, client.ObjectKeyFromObject(vSphereVM), mirrorVSphereVM)
@@ -294,6 +302,8 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 
 		c := conditions.Get(mirrorVSphereVM, NodeProvisionedCondition)
 		g.Expect(c.Status).To(Equal(corev1.ConditionTrue))
+
+		// TODO: check all the other conditions, the in memory objects actually exists, API server and etcd started etc.
 	})
 }
 

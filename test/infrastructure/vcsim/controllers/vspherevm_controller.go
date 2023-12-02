@@ -65,21 +65,60 @@ const (
 )
 
 const (
-	// NodeProvisionedCondition documents the status of the provisioning of the node hosted on the vSphereMachine.
+	// VMProvisionedCondition documents the status of the mirrorVSphereVM provisioning,
+	// which includes the VM being provisioned and with a boostrap secret available.
+	VMProvisionedCondition clusterv1.ConditionType = "VMProvisioned"
+
+	// WaitingForVMInfrastructureReason (Severity=Info) documents an mirrorVSphereVM VM waiting for the VM
+	// infrastructure to be ready.
+	WaitingForVMInfrastructureReason = "WaitingForVMInfrastructure"
+
+	// WaitingControlPlaneInitializedReason (Severity=Info) documents an mirrorVSphereVM VM waiting
+	// for the control plane to be initialized.
+	WaitingControlPlaneInitializedReason = "WaitingControlPlaneInitialized"
+
+	// WaitingForBootstrapDataReason (Severity=Info) documents an mirrorVSphereVM VM waiting for the bootstrap
+	// data to be ready before starting to create the CloudMachine/VM.
+	WaitingForBootstrapDataReason = "WaitingForBootstrapData"
+)
+
+var ( // TODO: make this configurable
+	nodeStartupDuration = 10 * time.Second
+	nodeStartupJitter   = 0.3
+)
+
+const (
+	// NodeProvisionedCondition documents the status of the provisioning of the node hosted on the mirrorVSphereVM.
 	NodeProvisionedCondition clusterv1.ConditionType = "NodeProvisioned"
 
-	// NodeWaitingForInfrastructureReadyReason (Severity=Info) documents a vSphereMachine waiting for the VM to report infrastructure ready.
-	NodeWaitingForInfrastructureReadyReason = "WaitingForInfrastructureReady"
+	// NodeWaitingForStartupTimeoutReason (Severity=Info) documents a mirrorVSphereVM Node provisioning.
+	NodeWaitingForStartupTimeoutReason = "WaitingForStartupTimeout"
+)
+
+var ( // TODO: make this configurable
+	etcdStartupDuration = 10 * time.Second
+	etcdStartupJitter   = 0.3
 )
 
 const (
-	// EtcdProvisionedCondition documents the status of the provisioning of the etcd member hosted on the vSphereMachine.
+	// EtcdProvisionedCondition documents the status of the provisioning of the etcd member hosted on the mirrorVSphereVM.
 	EtcdProvisionedCondition clusterv1.ConditionType = "EtcdProvisioned"
+
+	// EtcdWaitingForStartupTimeoutReason (Severity=Info) documents a mirrorVSphereVM etcd pod provisioning.
+	EtcdWaitingForStartupTimeoutReason = "WaitingForStartupTimeout"
+)
+
+var ( // TODO: make this configurable
+	apiServerStartupDuration = 10 * time.Second
+	apiServerStartupJitter   = 0.3
 )
 
 const (
-	// APIServerProvisionedCondition documents the status of the provisioning of the APIServer instance hosted on the vSphereMachine.
+	// APIServerProvisionedCondition documents the status of the provisioning of the APIServer instance hosted on the mirrorVSphereVM.
 	APIServerProvisionedCondition clusterv1.ConditionType = "APIServerProvisioned"
+
+	// APIServerWaitingForStartupTimeoutReason (Severity=Info) documents a mirrorVSphereVM API server pod provisioning.
+	APIServerWaitingForStartupTimeoutReason = "WaitingForStartupTimeout"
 )
 
 // defines annotations to be applied to in memory etcd pods in order to track etcd cluster
@@ -262,6 +301,10 @@ func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 func (r *VSphereVMReconciler) reconcileNormal(ctx context.Context, cluster *clusterv1.Cluster, vsphereCluster *infrav1.VSphereCluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, vSphereVM, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
+	if !conditions.Has(mirrorVSphereVM, VMProvisionedCondition) {
+		conditions.MarkFalse(mirrorVSphereVM, VMProvisionedCondition, WaitingForVMInfrastructureReason, clusterv1.ConditionSeverityInfo, "")
+	}
+
 	// If the VM is stuck provisioning waiting for IP (because there is no DHCP service in vcsim), the assign a fake IP.
 	if !vSphereVM.Status.Ready && conditions.IsFalse(vSphereVM, infrav1.VMProvisionedCondition) && conditions.GetReason(vSphereVM, infrav1.VMProvisionedCondition) == infrav1.WaitingForIPAllocationReason {
 		authSession, err := r.retrieveVcenterSession(ctx, vsphereCluster, vSphereVM)
@@ -350,24 +393,27 @@ func (r *VSphereVMReconciler) reconcileNormal(ctx context.Context, cluster *clus
 		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil // Wait for CAPV's VSphereVM controller to detect the ip address
 	}
 
-	// Check if the infrastructure is ready and the Bios UUID to be set (required for computing the Provide ID), otherwise return and wait for the vsphereVM object to be updated
-	if !vSphereVM.Status.Ready || vSphereVM.Spec.BiosUUID == "" {
-		log.Info("Waiting for vsphereMachine Controller to report infrastructure ready and to set provider ID")
-		conditions.MarkFalse(mirrorVSphereVM, NodeProvisionedCondition, NodeWaitingForInfrastructureReadyReason, clusterv1.ConditionSeverityInfo, "")
-		return ctrl.Result{}, nil
-	}
-
 	// Make sure bootstrap data is available and populated.
 	// NOTE: we are not using bootstrap data, but we wait for it in order to simulate a real machine provisioning workflow.
-	// TODO: watch for machines
 	if machine.Spec.Bootstrap.DataSecretName == nil {
 		if !util.IsControlPlaneMachine(machine) && !conditions.IsTrue(cluster, clusterv1.ControlPlaneInitializedCondition) {
+			conditions.MarkFalse(mirrorVSphereVM, VMProvisionedCondition, WaitingControlPlaneInitializedReason, clusterv1.ConditionSeverityInfo, "")
 			log.Info("Waiting for the control plane to be initialized")
 			return ctrl.Result{}, nil
 		}
 
+		conditions.MarkFalse(mirrorVSphereVM, VMProvisionedCondition, WaitingForBootstrapDataReason, clusterv1.ConditionSeverityInfo, "")
 		log.Info("Waiting for the Bootstrap provider controller to set bootstrap data")
 		return ctrl.Result{}, nil
+	}
+
+	// Check if the infrastructure is ready and the Bios UUID to be set (required for computing the Provide ID), otherwise return and wait for the vsphereVM object to be updated
+	if !vSphereVM.Status.Ready || vSphereVM.Spec.BiosUUID == "" {
+		log.Info("Waiting for vsphereMachine Controller to report infrastructure ready and to set provider ID")
+		return ctrl.Result{}, nil
+	}
+	if !conditions.IsTrue(mirrorVSphereVM, VMProvisionedCondition) {
+		conditions.MarkTrue(mirrorVSphereVM, VMProvisionedCondition)
 	}
 
 	// Call the inner reconciliation methods.
@@ -401,18 +447,15 @@ func (r *VSphereVMReconciler) reconcileNormal(ctx context.Context, cluster *clus
 }
 
 func (r *VSphereVMReconciler) reconcileNormalNode(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, vSphereVM, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
-	// Wait for the node/kubelet to start up; node/kubelet start happens a configurable time after the VM is provisioned.
-	/*
-		provisioningDuration := nodeStartupDuration
-		provisioningDuration += time.Duration(rand.Float64() * nodeStartupJitter * float64(provisioningDuration)) //nolint:gosec // Intentionally using a weak random number generator here.
+	provisioningDuration := nodeStartupDuration
+	provisioningDuration += time.Duration(rand.Float64() * nodeStartupJitter * float64(provisioningDuration)) //nolint:gosec // Intentionally using a weak random number generator here.
 
-		start := conditions.Get(mirrorVSphereVM, infrav1.VMProvisionedCondition).LastTransitionTime // TODO: figure out what to use as a starting time -> when the infra is ready
-		now := time.Now()
-		if now.Before(start.Add(provisioningDuration)) {
-			conditions.MarkFalse(mirrorVSphereVM, NodeProvisionedCondition, NodeWaitingForStartupTimeoutReason, clusterv1.ConditionSeverityInfo, "")
-			return ctrl.Result{RequeueAfter: start.Add(provisioningDuration).Sub(now)}, nil
-		}
-	*/
+	start := conditions.Get(mirrorVSphereVM, VMProvisionedCondition).LastTransitionTime
+	now := time.Now()
+	if now.Before(start.Add(provisioningDuration)) {
+		conditions.MarkFalse(mirrorVSphereVM, NodeProvisionedCondition, NodeWaitingForStartupTimeoutReason, clusterv1.ConditionSeverityInfo, "")
+		return ctrl.Result{RequeueAfter: start.Add(provisioningDuration).Sub(now)}, nil
+	}
 
 	// Compute the resource group unique name.
 	// NOTE: We are using reconcilerGroup also as a name for the listener for sake of simplicity.
@@ -472,17 +515,15 @@ func (r *VSphereVMReconciler) reconcileNormalETCD(ctx context.Context, cluster *
 	}
 
 	// Wait for the etcd pod to start up; etcd pod start happens a configurable time after the Node is provisioned.
-	/*
-		provisioningDuration := etcdStartupDuration
-		provisioningDuration += time.Duration(rand.Float64() * etcdStartupJitter * float64(provisioningDuration)) //nolint:gosec // Intentionally using a weak random number generator here.
+	provisioningDuration := etcdStartupDuration
+	provisioningDuration += time.Duration(rand.Float64() * etcdStartupJitter * float64(provisioningDuration)) //nolint:gosec // Intentionally using a weak random number generator here.
 
-		start := conditions.Get(mirrorVSphereVM, NodeProvisionedCondition).LastTransitionTime
-		now := time.Now()
-		if now.Before(start.Add(provisioningDuration)) {
-			conditions.MarkFalse(mirrorVSphereVM, EtcdProvisionedCondition, EtcdWaitingForStartupTimeoutReason, clusterv1.ConditionSeverityInfo, "")
-			return ctrl.Result{RequeueAfter: start.Add(provisioningDuration).Sub(now)}, nil
-		}
-	*/
+	start := conditions.Get(mirrorVSphereVM, NodeProvisionedCondition).LastTransitionTime
+	now := time.Now()
+	if now.Before(start.Add(provisioningDuration)) {
+		conditions.MarkFalse(mirrorVSphereVM, EtcdProvisionedCondition, EtcdWaitingForStartupTimeoutReason, clusterv1.ConditionSeverityInfo, "")
+		return ctrl.Result{RequeueAfter: start.Add(provisioningDuration).Sub(now)}, nil
+	}
 
 	// Compute the resource group unique name.
 	// NOTE: We are using reconcilerGroup also as a name for the listener for sake of simplicity.
@@ -610,17 +651,15 @@ func (r *VSphereVMReconciler) reconcileNormalAPIServer(ctx context.Context, clus
 	}
 
 	// Wait for the API server pod to start up; API server pod start happens a configurable time after the Node is provisioned.
-	/*
-		provisioningDuration := apiServerStartupDuration
-		provisioningDuration += time.Duration(rand.Float64() * apiServerStartupJitter * float64(provisioningDuration)) //nolint:gosec // Intentionally using a weak random number generator here.
+	provisioningDuration := apiServerStartupDuration
+	provisioningDuration += time.Duration(rand.Float64() * apiServerStartupJitter * float64(provisioningDuration)) //nolint:gosec // Intentionally using a weak random number generator here.
 
-		start := conditions.Get(mirrorVSphereVM, NodeProvisionedCondition).LastTransitionTime
-		now := time.Now()
-		if now.Before(start.Add(provisioningDuration)) {
-			conditions.MarkFalse(mirrorVSphereVM, APIServerProvisionedCondition, APIServerWaitingForStartupTimeoutReason, clusterv1.ConditionSeverityInfo, "")
-			return ctrl.Result{RequeueAfter: start.Add(provisioningDuration).Sub(now)}, nil
-		}
-	*/
+	start := conditions.Get(mirrorVSphereVM, NodeProvisionedCondition).LastTransitionTime
+	now := time.Now()
+	if now.Before(start.Add(provisioningDuration)) {
+		conditions.MarkFalse(mirrorVSphereVM, APIServerProvisionedCondition, APIServerWaitingForStartupTimeoutReason, clusterv1.ConditionSeverityInfo, "")
+		return ctrl.Result{RequeueAfter: start.Add(provisioningDuration).Sub(now)}, nil
+	}
 
 	// Compute the resource group unique name.
 	// NOTE: We are using reconcilerGroup also as a name for the listener for sake of simplicity.
