@@ -48,7 +48,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	vmwarev1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/vmware/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-vsphere/test/helpers"
+	"sigs.k8s.io/cluster-api-provider-vsphere/internal/test/helpers"
 )
 
 const (

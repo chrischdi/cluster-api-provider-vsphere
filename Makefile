@@ -294,6 +294,7 @@ generate-go-deepcopy: $(CONTROLLER_GEN) ## Generate deepcopy go code for core
 .PHONY: generate-modules
 generate-modules: ## Run go mod tidy to ensure modules are up to date
 	go mod tidy
+	cd $(TEST_DIR); go mod tidy
 
 .PHONY: generate-doctoc
 generate-doctoc:
