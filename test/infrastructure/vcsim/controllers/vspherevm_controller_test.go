@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"strings"
 	"testing"
 
 	. "github.com/onsi/gomega"
@@ -151,14 +150,9 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 		cloudMgr.AddResourceGroup(klog.KObj(cluster).String())
 		cloudClient := cloudMgr.GetResourceGroup(klog.KObj(cluster).String()).GetClient()
 
-		// Start an http server
-		apiServerMux, err := server.NewWorkloadClustersMux(cloudMgr, "127.0.0.1")
-		g.Expect(err).ToNot(HaveOccurred())
-
 		r := VSphereVMReconciler{
 			Client:       crclient,
 			CloudManager: cloudMgr,
-			APIServerMux: apiServerMux,
 		}
 
 		// Reconcile
@@ -236,6 +230,12 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 					},
 				},
 			},
+			Spec: infrav1.VSphereMachineSpec{
+				ProviderID: pointer.String("foo"), // This unblocks provisioning of node
+			},
+			Status: infrav1.VSphereMachineStatus{
+				Ready: true, // This unblocks provisioning of node
+			},
 		}
 
 		vSphereVM := &infrav1.VSphereVM{
@@ -253,9 +253,6 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 				Finalizers: []string{
 					VMFinalizer, // Adding this to move past the first reconcile
 				},
-			},
-			Status: infrav1.VSphereVMStatus{
-				Ready: true, // This unblocks provisioning of node
 			},
 		}
 
@@ -317,7 +314,6 @@ func Test_FOO(t *testing.T) {
 	crclient := fake.NewClientBuilder().WithObjects(vCenter).WithStatusSubresource(vCenter).WithScheme(scheme).Build()
 	r := &VCenterReconciler{
 		Client: crclient,
-		PodIp:  "127.0.0.1",
 	}
 
 	// PART 1: Should create a new VCenter
@@ -334,7 +330,7 @@ func Test_FOO(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 
 	params := session.NewParams().
-		WithServer(fmt.Sprintf("https://%s", strings.Replace(vCenter.Status.Host, r.PodIp, "127.0.0.1", 1))). // TODO: use govc address
+		WithServer(vCenter.Status.Host).
 		WithThumbprint(vCenter.Status.Thumbprint).
 		WithUserInfo(vCenter.Status.Username, vCenter.Status.Password)
 

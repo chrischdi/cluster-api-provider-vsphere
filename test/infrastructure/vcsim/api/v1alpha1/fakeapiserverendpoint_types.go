@@ -37,12 +37,6 @@ type FakeAPIServerEndpointStatus struct {
 
 	// The control plane port.
 	Port int `json:"port,omitempty"`
-
-	// The output of a envsubst generator, which is automatically triggered
-	// in order to make it easier to consume the endpoint from a Cluster API template.
-	// NOTE: Cluster API cluster name must be equal to the control plane endpoint name
-	// in order to comply with the assumptions hard coded in the fake API server implementation.
-	EnvSubst EnvVars `json:"envsubst,omitempty"`
 }
 
 // +kubebuilder:resource:path=fakeapiserverendpoints,scope=Namespaced,categories=cluster-api

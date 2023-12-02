@@ -74,9 +74,10 @@ var (
 	diagnosticsOptions          = flags.DiagnosticsOptions{}
 	logOptions                  = logs.NewOptions()
 	// vcsim specific flags.
-	vmConcurrency           int
-	serverConcurrency       int
-	controlPlaneConcurrency int
+	vmConcurrency            int
+	vCenterConcurrency       int
+	fakeAPIServerConcurrency int
+	envsubstConcurrency      int
 	// vsphere session specific flags.
 	enableKeepAlive   bool
 	keepAliveDuration time.Duration
@@ -127,11 +128,14 @@ func InitFlags(fs *pflag.FlagSet) {
 	fs.IntVar(&vmConcurrency, "vm-concurrency", 10,
 		"Number of vsphere VM to process simultaneously")
 
-	fs.IntVar(&serverConcurrency, "server-concurrency", 10,
+	fs.IntVar(&vCenterConcurrency, "vcenter-concurrency", 10,
 		"Number of vcsim server to process simultaneously")
 
-	fs.IntVar(&controlPlaneConcurrency, "control-plane-endpoint-concurrency", 10,
+	fs.IntVar(&fakeAPIServerConcurrency, "fake-apiserver-endpoint-concurrency", 10,
 		"Number of vcsim control plane endpoint to process simultaneously")
+
+	fs.IntVar(&envsubstConcurrency, "envsubst-concurrency", 10,
+		"Number of envsubst to process simultaneously")
 
 	fs.DurationVar(&syncPeriod, "sync-period", 10*time.Minute,
 		"The minimum interval at which watched resources are reconciled (e.g. 15m)")
@@ -285,9 +289,8 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 	// Setup reconcilers
 	if err := (&controllers.VCenterReconciler{
 		Client:           mgr.GetClient(),
-		PodIp:            podIP,
 		WatchFilterValue: watchFilterValue,
-	}).SetupWithManager(ctx, mgr, concurrency(serverConcurrency)); err != nil {
+	}).SetupWithManager(ctx, mgr, concurrency(vCenterConcurrency)); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VCenterReconciler")
 		os.Exit(1)
 	}
@@ -298,7 +301,7 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 		APIServerMux:     apiServerMux,
 		PodIp:            podIP,
 		WatchFilterValue: watchFilterValue,
-	}).SetupWithManager(ctx, mgr, concurrency(controlPlaneConcurrency)); err != nil {
+	}).SetupWithManager(ctx, mgr, concurrency(fakeAPIServerConcurrency)); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FakeAPIServerEndpointReconciler")
 		os.Exit(1)
 	}
@@ -312,6 +315,15 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 		WatchFilterValue:  watchFilterValue,
 	}).SetupWithManager(ctx, mgr, concurrency(vmConcurrency)); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VSphereVMReconciler")
+		os.Exit(1)
+	}
+
+	if err := (&controllers.EnvSubstReconciler{
+		Client:           mgr.GetClient(),
+		PodIp:            podIP,
+		WatchFilterValue: watchFilterValue,
+	}).SetupWithManager(ctx, mgr, concurrency(envsubstConcurrency)); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "EnvSubstReconciler")
 		os.Exit(1)
 	}
 }

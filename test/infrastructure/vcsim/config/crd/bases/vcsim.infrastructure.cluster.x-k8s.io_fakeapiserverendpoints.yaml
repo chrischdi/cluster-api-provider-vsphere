@@ -41,32 +41,6 @@ spec:
             description: FakeAPIServerEndpointStatus defines the observed state of
               the FakeAPIServerEndpoint.
             properties:
-              envsubst:
-                description: 'The output of a envsubst generator, which is automatically
-                  triggered in order to make it easier to consume the endpoint from
-                  a Cluster API template. NOTE: Cluster API cluster name must be equal
-                  to the control plane endpoint name in order to comply with the assumptions
-                  hard coded in the fake API server implementation.'
-                properties:
-                  clusters:
-                    description: the output of a envsubst generator for each Cluster
-                      API cluster.
-                    items:
-                      description: ClusterEnvVars defines the output of a envsubst
-                        generator for a specific Cluster API cluster.
-                      properties:
-                        name:
-                          description: name of the Cluster API cluster.
-                          type: string
-                        variables:
-                          additionalProperties:
-                            type: string
-                          description: variables to use with envsubst when creating
-                            the Cluster API cluster.
-                          type: object
-                      type: object
-                    type: array
-                type: object
               host:
                 description: The control plane host.
                 type: string

@@ -18,15 +18,12 @@ package controllers
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"net"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -36,7 +33,6 @@ import (
 	_ "github.com/vmware/govmomi/govc/vm"
 	pbmsimulator "github.com/vmware/govmomi/pbm/simulator"
 	"github.com/vmware/govmomi/simulator"
-	"golang.org/x/crypto/ssh"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/pointer"
@@ -53,10 +49,8 @@ import (
 
 type VCenterReconciler struct {
 	Client client.Client
-	PodIp  string
 
 	vcsimInstances map[string]*vcsim.Simulator
-	sshKeys        map[string]string
 	lock           sync.RWMutex
 
 	// WatchFilterValue is the label value used to filter events prior to reconciliation.
@@ -122,31 +116,7 @@ func (r *VCenterReconciler) reconcileNormal(ctx context.Context, vCenter *vcsimv
 		r.vcsimInstances = map[string]*vcsim.Simulator{}
 	}
 
-	if r.sshKeys == nil {
-		r.sshKeys = map[string]string{}
-	}
-
 	key := klog.KObj(vCenter).String()
-
-	sshKey, ok := r.sshKeys[key]
-	if !ok {
-		bitSize := 4096
-
-		privateKey, err := generatePrivateKey(bitSize)
-		if err != nil {
-			return ctrl.Result{}, errors.Wrapf(err, "failed to generate private key")
-		}
-
-		publicKeyBytes, err := generatePublicKey(&privateKey.PublicKey)
-		if err != nil {
-			return ctrl.Result{}, errors.Wrapf(err, "failed to generate public key")
-		}
-
-		sshKey = string(publicKeyBytes)
-		r.sshKeys[key] = sshKey
-		log.Info("Created ssh authorized key")
-	}
-
 	vcsimInstance, ok := r.vcsimInstances[key]
 	if !ok {
 		// Define the model for the VCSim instance, starting from simulator.VPX
@@ -237,49 +207,6 @@ func (r *VCenterReconciler) reconcileNormal(ctx context.Context, vCenter *vcsimv
 		vCenter.Status.Thumbprint = ThumbprintSHA1(cert)
 	}
 
-	clusters := []vcsimv1.ClusterEnvSubstGeneratorSpec{
-		{
-			Name: "*",
-		},
-	}
-	if vCenter.Spec.Generators.EnvSubst != nil {
-		clusters = append(clusters, vCenter.Spec.Generators.EnvSubst.Clusters...)
-	}
-
-	vCenter.Status.EnvSubst.Clusters = make([]vcsimv1.ClusterEnvVars, len(clusters))
-	for i, cluster := range clusters {
-		clusterEnvVars := vcsimv1.ClusterEnvVars{
-			Name: cluster.Name,
-			Variables: map[string]string{
-				// cluster template variables about the vcsim instance.
-				"VSPHERE_SERVER":             fmt.Sprintf("https://%s", vCenter.Status.Host),
-				"VSPHERE_PASSWORD":           vCenter.Status.Password,
-				"VSPHERE_USERNAME":           vCenter.Status.Username,
-				"VSPHERE_TLS_THUMBPRINT":     vCenter.Status.Thumbprint,
-				"VSPHERE_DATACENTER":         fmt.Sprintf("DC%d", pointer.IntDeref(cluster.Datacenter, 0)),
-				"VSPHERE_DATASTORE":          fmt.Sprintf("LocalDS_%d", pointer.IntDeref(cluster.Datastore, 0)),
-				"VSPHERE_FOLDER":             fmt.Sprintf("/DC%d/vm", pointer.IntDeref(cluster.Datacenter, 0)),                                                               // this is the default folder that gets created. TODO: consider if to make it possible to create more (this requires changes to the API)
-				"VSPHERE_NETWORK":            fmt.Sprintf("/DC%d/network/VM Network", pointer.IntDeref(cluster.Datacenter, 0)),                                               // this is the default network that gets created. TODO: consider if to make it possible to create more (this requires changes to the API)
-				"VSPHERE_RESOURCE_POOL":      fmt.Sprintf("/DC%d/host/DC%[1]d_C%d/Resources", pointer.IntDeref(cluster.Datacenter, 0), pointer.IntDeref(cluster.Cluster, 0)), // all pool have RP as prefix. TODO: make it possible to pick one (0 --> Resources, >0 --> RPn)
-				"VSPHERE_STORAGE_POLICY":     "vSAN Default Storage Policy",
-				"VSPHERE_TEMPLATE":           fmt.Sprintf("/DC%d/vm/ubuntu-2204-kube-vX", pointer.IntDeref(cluster.Datacenter, 0)),
-				"VSPHERE_SSH_AUTHORIZED_KEY": sshKey,
-
-				// other variables required by the cluster template.
-				"NAMESPACE":                   vCenter.Namespace,
-				"CLUSTER_NAME":                cluster.Name,
-				"KUBERNETES_VERSION":          pointer.StringDeref(cluster.KubernetesVersion, "v1.28.0"),
-				"CONTROL_PLANE_MACHINE_COUNT": strconv.Itoa(pointer.IntDeref(cluster.ControlPlaneMachines, 1)),
-				"WORKER_MACHINE_COUNT":        strconv.Itoa(pointer.IntDeref(cluster.WorkerMachines, 1)),
-
-				// variables to set up govc for working with the vcsim instance.
-				"GOVC_URL":      fmt.Sprintf("https://%s:%s@%s/sdk", vCenter.Status.Username, vCenter.Status.Password, strings.Replace(vCenter.Status.Host, r.PodIp, "127.0.0.1", 1)), // NOTE: reverting back to local host because the assumption is that the vcsim pod will be port-forwarded on local host
-				"GOVC_INSECURE": "true",
-			},
-		}
-		vCenter.Status.EnvSubst.Clusters[i] = clusterEnvVars
-	}
-
 	return ctrl.Result{}, nil
 }
 
@@ -325,34 +252,4 @@ func ThumbprintSHA1(cert *x509.Certificate) string {
 		hex[i] = fmt.Sprintf("%02X", b)
 	}
 	return strings.Join(hex, ":")
-}
-
-// generatePrivateKey creates a RSA Private Key of specified byte size
-func generatePrivateKey(bitSize int) (*rsa.PrivateKey, error) {
-	// Private Key generation
-	privateKey, err := rsa.GenerateKey(rand.Reader, bitSize)
-	if err != nil {
-		return nil, err
-	}
-
-	// Validate Private Key
-	err = privateKey.Validate()
-	if err != nil {
-		return nil, err
-	}
-
-	return privateKey, nil
-}
-
-// generatePublicKey take a rsa.PublicKey and return bytes suitable for writing to .pub file
-// returns in the format "ssh-rsa ..."
-func generatePublicKey(privatekey *rsa.PublicKey) ([]byte, error) {
-	publicRsaKey, err := ssh.NewPublicKey(privatekey)
-	if err != nil {
-		return nil, err
-	}
-
-	pubKeyBytes := ssh.MarshalAuthorizedKey(publicRsaKey)
-
-	return pubKeyBytes, nil
 }

@@ -18,7 +18,6 @@ package controllers
 
 import (
 	"context"
-	"strconv"
 
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -113,18 +112,6 @@ func (r *FakeAPIServerEndpointReconciler) reconcileNormal(ctx context.Context, f
 
 	fakeAPIServerEndpoint.Status.Host = r.PodIp // NOTE: we are replacing the listener ip with the pod ip so it will be accessible from other pods as well
 	fakeAPIServerEndpoint.Status.Port = listener.Port()
-
-	fakeAPIServerEndpoint.Status.EnvSubst = vcsimv1.EnvVars{
-		Clusters: []vcsimv1.ClusterEnvVars{
-			{
-				Name: fakeAPIServerEndpoint.Name,
-				Variables: map[string]string{
-					"CONTROL_PLANE_ENDPOINT_IP":   fakeAPIServerEndpoint.Status.Host,
-					"CONTROL_PLANE_ENDPOINT_PORT": strconv.Itoa(fakeAPIServerEndpoint.Status.Port),
-				},
-			},
-		},
-	}
 
 	return ctrl.Result{}, nil
 }

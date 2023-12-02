@@ -351,9 +351,9 @@ func (r *VSphereVMReconciler) reconcileNormal(ctx context.Context, cluster *clus
 		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil // Wait for CAPV's VSphereVM controller to detect the ip address
 	}
 
-	// Check if the infrastructure is ready, otherwise return and wait for the vSphereVM object to be updated
-	if !vSphereVM.Status.Ready || vsphereMachine.Spec.ProviderID == nil {
-		log.Info("Waiting for vSphereVM Controller to create machine's infrastructure and for VSphereMachine controller to set provider ID")
+	// Check if the infrastructure is ready and the Provide ID set, otherwise return and wait for the vsphereMachine object to be updated
+	if !vsphereMachine.Status.Ready || vsphereMachine.Spec.ProviderID == nil {
+		log.Info("Waiting for vsphereMachine Controller to report infrastructure ready and to set provider ID")
 		conditions.MarkFalse(mirrorVSphereVM, NodeProvisionedCondition, NodeWaitingForInfrastructureReadyReason, clusterv1.ConditionSeverityInfo, "")
 		return ctrl.Result{}, nil
 	}

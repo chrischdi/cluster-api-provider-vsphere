@@ -18,7 +18,6 @@ package controllers
 import (
 	"fmt"
 	"path"
-	"strings"
 	"testing"
 
 	_ "github.com/dougm/pretty"
@@ -56,7 +55,6 @@ func Test_Reconcile_Server(t *testing.T) {
 	crclient := fake.NewClientBuilder().WithObjects(vCenter).WithStatusSubresource(vCenter).WithScheme(scheme).Build()
 	r := &VCenterReconciler{
 		Client: crclient,
-		PodIp:  "127.0.0.1",
 	}
 
 	// PART 1: Should create a new VCenter
@@ -87,7 +85,7 @@ func Test_Reconcile_Server(t *testing.T) {
 	g.Expect(vCenter.Status.Password).ToNot(BeEmpty())
 
 	params := session.NewParams().
-		WithServer(fmt.Sprintf("https://%s", strings.Replace(vCenter.Status.Host, r.PodIp, "127.0.0.1", 1))). // TODO: use govc address
+		WithServer(vCenter.Status.Host).
 		WithThumbprint(vCenter.Status.Thumbprint).
 		WithUserInfo(vCenter.Status.Username, vCenter.Status.Password)
 
@@ -139,7 +137,6 @@ func Test_govmomi_fix(t *testing.T) {
 	crclient := fake.NewClientBuilder().WithObjects(vCenter).WithStatusSubresource(vCenter).WithScheme(scheme).Build()
 	r := &VCenterReconciler{
 		Client: crclient,
-		PodIp:  "127.0.0.1",
 	}
 
 	// PART 1: Should create a new VCenter
@@ -156,7 +153,7 @@ func Test_govmomi_fix(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 
 	params := session.NewParams().
-		WithServer(fmt.Sprintf("https://%s", strings.Replace(vCenter.Status.Host, r.PodIp, "127.0.0.1", 1))). // TODO: use govc address
+		WithServer(vCenter.Status.Host).
 		WithThumbprint(vCenter.Status.Thumbprint).
 		WithUserInfo(vCenter.Status.Username, vCenter.Status.Password)
 
