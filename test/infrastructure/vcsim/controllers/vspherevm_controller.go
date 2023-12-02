@@ -34,7 +34,6 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
-	"k8s.io/utils/pointer"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	capiutil "sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
@@ -260,7 +259,7 @@ func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return r.reconcileNormal(ctx, cluster, vsphereCluster, machine, vSphereMachine, vSphereVM, mirrorVSphereVM)
 }
 
-func (r *VSphereVMReconciler) reconcileNormal(ctx context.Context, cluster *clusterv1.Cluster, vsphereCluster *infrav1.VSphereCluster, machine *clusterv1.Machine, vsphereMachine *infrav1.VSphereMachine, vSphereVM, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileNormal(ctx context.Context, cluster *clusterv1.Cluster, vsphereCluster *infrav1.VSphereCluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, vSphereVM, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	// If the VM is stuck provisioning waiting for IP (because there is no DHCP service in vcsim), the assign a fake IP.
@@ -351,8 +350,8 @@ func (r *VSphereVMReconciler) reconcileNormal(ctx context.Context, cluster *clus
 		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil // Wait for CAPV's VSphereVM controller to detect the ip address
 	}
 
-	// Check if the infrastructure is ready and the Provide ID set, otherwise return and wait for the vsphereMachine object to be updated
-	if !vsphereMachine.Status.Ready || vsphereMachine.Spec.ProviderID == nil {
+	// Check if the infrastructure is ready and the Bios UUID to be set (required for computing the Provide ID), otherwise return and wait for the vsphereVM object to be updated
+	if !vSphereVM.Status.Ready || vSphereVM.Spec.BiosUUID == "" {
 		log.Info("Waiting for vsphereMachine Controller to report infrastructure ready and to set provider ID")
 		conditions.MarkFalse(mirrorVSphereVM, NodeProvisionedCondition, NodeWaitingForInfrastructureReadyReason, clusterv1.ConditionSeverityInfo, "")
 		return ctrl.Result{}, nil
@@ -372,7 +371,7 @@ func (r *VSphereVMReconciler) reconcileNormal(ctx context.Context, cluster *clus
 	}
 
 	// Call the inner reconciliation methods.
-	phases := []func(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, vsphereMachine *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error){
+	phases := []func(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, vsphereVM, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error){
 		r.reconcileNormalNode,
 		r.reconcileNormalETCD,
 		r.reconcileNormalAPIServer,
@@ -386,7 +385,7 @@ func (r *VSphereVMReconciler) reconcileNormal(ctx context.Context, cluster *clus
 	res := ctrl.Result{}
 	errs := make([]error, 0)
 	for _, phase := range phases {
-		phaseResult, err := phase(ctx, cluster, machine, vsphereMachine, mirrorVSphereVM)
+		phaseResult, err := phase(ctx, cluster, machine, vSphereVM, mirrorVSphereVM)
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -401,7 +400,7 @@ func (r *VSphereVMReconciler) reconcileNormal(ctx context.Context, cluster *clus
 	return res, kerrors.NewAggregate(errs)
 }
 
-func (r *VSphereVMReconciler) reconcileNormalNode(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, vsphereMachine *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileNormalNode(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, vSphereVM, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	// Wait for the node/kubelet to start up; node/kubelet start happens a configurable time after the VM is provisioned.
 	/*
 		provisioningDuration := nodeStartupDuration
@@ -427,7 +426,7 @@ func (r *VSphereVMReconciler) reconcileNormalNode(ctx context.Context, cluster *
 			Name: mirrorVSphereVM.Name,
 		},
 		Spec: corev1.NodeSpec{
-			ProviderID: calculateProviderID(vsphereMachine),
+			ProviderID: calculateProviderID(vSphereVM),
 		},
 		Status: corev1.NodeStatus{
 			Conditions: []corev1.NodeCondition{
@@ -461,7 +460,7 @@ func (r *VSphereVMReconciler) reconcileNormalNode(ctx context.Context, cluster *
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileNormalETCD(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileNormalETCD(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -599,7 +598,7 @@ func (r *VSphereVMReconciler) reconcileNormalETCD(ctx context.Context, cluster *
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileNormalAPIServer(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileNormalAPIServer(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -702,7 +701,7 @@ func (r *VSphereVMReconciler) reconcileNormalAPIServer(ctx context.Context, clus
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileNormalScheduler(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileNormalScheduler(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -750,7 +749,7 @@ func (r *VSphereVMReconciler) reconcileNormalScheduler(ctx context.Context, clus
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileNormalControllerManager(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileNormalControllerManager(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -798,7 +797,7 @@ func (r *VSphereVMReconciler) reconcileNormalControllerManager(ctx context.Conte
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileNormalKubeadmObjects(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, _ *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileNormalKubeadmObjects(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _, _ *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -866,7 +865,7 @@ func (r *VSphereVMReconciler) reconcileNormalKubeadmObjects(ctx context.Context,
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileNormalKubeProxy(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, _ *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileNormalKubeProxy(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _, _ *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -913,7 +912,7 @@ func (r *VSphereVMReconciler) reconcileNormalKubeProxy(ctx context.Context, clus
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileNormalCoredns(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, _ *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileNormalCoredns(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _, _ *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -977,9 +976,9 @@ func (r *VSphereVMReconciler) reconcileNormalCoredns(ctx context.Context, cluste
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileDelete(ctx context.Context, cluster *clusterv1.Cluster, _ *infrav1.VSphereCluster, machine *clusterv1.Machine, vsphereMachine *infrav1.VSphereMachine, vSphereVM, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileDelete(ctx context.Context, cluster *clusterv1.Cluster, _ *infrav1.VSphereCluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, vSphereVM, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	// Call the inner reconciliation methods.
-	phases := []func(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, vsphereMachine *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error){
+	phases := []func(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, vSphereVM, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error){
 		// TODO: revisit order when we implement behaviour for the deletion workflow
 		r.reconcileDeleteNode,
 		r.reconcileDeleteETCD,
@@ -992,7 +991,7 @@ func (r *VSphereVMReconciler) reconcileDelete(ctx context.Context, cluster *clus
 	res := ctrl.Result{}
 	errs := make([]error, 0)
 	for _, phase := range phases {
-		phaseResult, err := phase(ctx, cluster, machine, vsphereMachine, mirrorVSphereVM)
+		phaseResult, err := phase(ctx, cluster, machine, vSphereVM, mirrorVSphereVM)
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -1007,7 +1006,7 @@ func (r *VSphereVMReconciler) reconcileDelete(ctx context.Context, cluster *clus
 	return res, kerrors.NewAggregate(errs)
 }
 
-func (r *VSphereVMReconciler) reconcileDeleteNode(ctx context.Context, cluster *clusterv1.Cluster, _ *clusterv1.Machine, _ *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileDeleteNode(ctx context.Context, cluster *clusterv1.Cluster, _ *clusterv1.Machine, _, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	// Compute the resource group unique name.
 	// NOTE: We are using reconcilerGroup also as a name for the listener for sake of simplicity.
 	resourceGroup := klog.KObj(cluster).String()
@@ -1028,7 +1027,7 @@ func (r *VSphereVMReconciler) reconcileDeleteNode(ctx context.Context, cluster *
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileDeleteETCD(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileDeleteETCD(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -1061,7 +1060,7 @@ func (r *VSphereVMReconciler) reconcileDeleteETCD(ctx context.Context, cluster *
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileDeleteAPIServer(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileDeleteAPIServer(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -1089,7 +1088,7 @@ func (r *VSphereVMReconciler) reconcileDeleteAPIServer(ctx context.Context, clus
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileDeleteScheduler(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileDeleteScheduler(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -1113,7 +1112,7 @@ func (r *VSphereVMReconciler) reconcileDeleteScheduler(ctx context.Context, clus
 	return ctrl.Result{}, nil
 }
 
-func (r *VSphereVMReconciler) reconcileDeleteControllerManager(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereMachine, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *VSphereVMReconciler) reconcileDeleteControllerManager(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _, mirrorVSphereVM *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -1174,8 +1173,8 @@ func (r *VSphereVMReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Man
 	return nil
 }
 
-func calculateProviderID(vsphereMachine *infrav1.VSphereMachine) string {
-	return pointer.StringDeref(vsphereMachine.Spec.ProviderID, "")
+func calculateProviderID(vSphereVM *infrav1.VSphereVM) string {
+	return util.ConvertUUIDToProviderID(vSphereVM.Spec.BiosUUID)
 }
 
 type etcdInfo struct {
