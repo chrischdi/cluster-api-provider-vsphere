@@ -35,6 +35,8 @@ const (
 	ClusterClass         = "cluster-class"
 	ClusterTopology      = "cluster-topology"
 	NodeIPAM             = "node-ipam"
+	VCSIM                = "vcsim"
+	VCSIMSupervisor      = "vcsim-supervisor"
 )
 
 func ClusterClassTemplateWithKubeVIP() []runtime.Object {
@@ -82,10 +84,10 @@ func MultiNodeTemplateWithKubeVIP() ([]runtime.Object, error) {
 	vsphereCluster := newVSphereCluster()
 	cpMachineTemplate := newVSphereMachineTemplate(env.ClusterNameVar)
 	workerMachineTemplate := newVSphereMachineTemplate(fmt.Sprintf("%s-worker", env.ClusterNameVar))
-	controlPlane := newKubeadmControlplane(cpMachineTemplate, newKubeVIPFiles())
+	controlPlane := newKubeadmControlplane(&cpMachineTemplate, newKubeVIPFiles())
 	kubeadmJoinTemplate := newKubeadmConfigTemplate(fmt.Sprintf("%s%s", env.ClusterNameVar, env.MachineDeploymentNameSuffix), true)
-	cluster := newCluster(vsphereCluster, &controlPlane)
-	machineDeployment := newMachineDeployment(cluster, workerMachineTemplate, kubeadmJoinTemplate)
+	cluster := newCluster(&vsphereCluster, &controlPlane)
+	machineDeployment := newMachineDeployment(cluster, &workerMachineTemplate, kubeadmJoinTemplate)
 	clusterResourceSet := newClusterResourceSet(cluster)
 	crsResourcesCSI, err := crs.CreateCrsResourceObjectsCSI(&clusterResourceSet)
 	if err != nil {
@@ -116,10 +118,10 @@ func MultiNodeTemplateWithExternalLoadBalancer() ([]runtime.Object, error) {
 	vsphereCluster := newVSphereCluster()
 	cpMachineTemplate := newVSphereMachineTemplate(env.ClusterNameVar)
 	workerMachineTemplate := newVSphereMachineTemplate(fmt.Sprintf("%s-worker", env.ClusterNameVar))
-	controlPlane := newKubeadmControlplane(cpMachineTemplate, nil)
+	controlPlane := newKubeadmControlplane(&cpMachineTemplate, nil)
 	kubeadmJoinTemplate := newKubeadmConfigTemplate(fmt.Sprintf("%s%s", env.ClusterNameVar, env.MachineDeploymentNameSuffix), true)
-	cluster := newCluster(vsphereCluster, &controlPlane)
-	machineDeployment := newMachineDeployment(cluster, workerMachineTemplate, kubeadmJoinTemplate)
+	cluster := newCluster(&vsphereCluster, &controlPlane)
+	machineDeployment := newMachineDeployment(cluster, &workerMachineTemplate, kubeadmJoinTemplate)
 	clusterResourceSet := newClusterResourceSet(cluster)
 	crsResourcesCSI, err := crs.CreateCrsResourceObjectsCSI(&clusterResourceSet)
 	if err != nil {
@@ -159,8 +161,8 @@ func MultiNodeTemplateWithKubeVIPIgnition() ([]runtime.Object, error) {
 	controlPlane := newIgnitionKubeadmControlplane(machineTemplate, files)
 
 	kubeadmJoinTemplate := newIgnitionKubeadmConfigTemplate()
-	cluster := newCluster(vsphereCluster, &controlPlane)
-	machineDeployment := newMachineDeployment(cluster, machineTemplate, kubeadmJoinTemplate)
+	cluster := newCluster(&vsphereCluster, &controlPlane)
+	machineDeployment := newMachineDeployment(cluster, &machineTemplate, kubeadmJoinTemplate)
 	clusterResourceSet := newClusterResourceSet(cluster)
 	crsResourcesCSI, err := crs.CreateCrsResourceObjectsCSI(&clusterResourceSet)
 	if err != nil {
@@ -190,10 +192,10 @@ func MultiNodeTemplateWithKubeVIPNodeIPAM() ([]runtime.Object, error) {
 	vsphereCluster := newVSphereCluster()
 	cpMachineTemplate := newNodeIPAMVSphereMachineTemplate(env.ClusterNameVar)
 	workerMachineTemplate := newNodeIPAMVSphereMachineTemplate(fmt.Sprintf("%s-worker", env.ClusterNameVar))
-	controlPlane := newKubeadmControlplane(cpMachineTemplate, newKubeVIPFiles())
+	controlPlane := newKubeadmControlplane(&cpMachineTemplate, newKubeVIPFiles())
 	kubeadmJoinTemplate := newKubeadmConfigTemplate(fmt.Sprintf("%s%s", env.ClusterNameVar, env.MachineDeploymentNameSuffix), true)
-	cluster := newCluster(vsphereCluster, &controlPlane)
-	machineDeployment := newMachineDeployment(cluster, workerMachineTemplate, kubeadmJoinTemplate)
+	cluster := newCluster(&vsphereCluster, &controlPlane)
+	machineDeployment := newMachineDeployment(cluster, &workerMachineTemplate, kubeadmJoinTemplate)
 	clusterResourceSet := newClusterResourceSet(cluster)
 	crsResourcesCSI, err := crs.CreateCrsResourceObjectsCSI(&clusterResourceSet)
 	if err != nil {
@@ -216,6 +218,56 @@ func MultiNodeTemplateWithKubeVIPNodeIPAM() ([]runtime.Object, error) {
 
 	MultiNodeTemplate = append(MultiNodeTemplate, crsResourcesCSI...)
 	MultiNodeTemplate = append(MultiNodeTemplate, crsResourcesCPI...)
+
+	return MultiNodeTemplate, nil
+}
+
+func QuickStartVCSIM() ([]runtime.Object, error) {
+	vsphereCluster := newVSphereCluster()
+	cpMachineTemplate := newVSphereMachineTemplate(env.ClusterNameVar)
+	workerMachineTemplate := newVSphereMachineTemplate(fmt.Sprintf("%s-worker", env.ClusterNameVar))
+	controlPlane := newKubeadmControlplane(&cpMachineTemplate, newKubeVIPFiles())                                                   // NOTE: kubeadm settings are not relevant for vcsim, but we are adding the same KCP used by other templates for sake of simplicity
+	kubeadmJoinTemplate := newKubeadmConfigTemplate(fmt.Sprintf("%s%s", env.ClusterNameVar, env.MachineDeploymentNameSuffix), true) // NOTE: kubeadm settings are not relevant for vcsim, but we are adding the same KCP used by other templates for sake of simplicity
+	cluster := newCluster(&vsphereCluster, &controlPlane)
+	machineDeployment := newMachineDeployment(cluster, &workerMachineTemplate, kubeadmJoinTemplate)
+	identitySecret := newIdentitySecret()
+	// Note: templates for vcsim do not require CRS for kube-vip, csi, cpi.
+
+	MultiNodeTemplate := []runtime.Object{
+		&cluster,
+		&vsphereCluster,
+		&cpMachineTemplate,
+		&workerMachineTemplate,
+		&controlPlane,
+		&kubeadmJoinTemplate,
+		&machineDeployment,
+		&identitySecret,
+	}
+
+	return MultiNodeTemplate, nil
+}
+
+func QuickStartVCSIMSupervisor() ([]runtime.Object, error) {
+	vmwareCluster := newVMWareCluster()
+	cpMachineTemplate := newVMWareMachineTemplate(env.ClusterNameVar)
+	workerMachineTemplate := newVMWareMachineTemplate(fmt.Sprintf("%s-worker", env.ClusterNameVar))
+	controlPlane := newKubeadmControlplane(&cpMachineTemplate, newKubeVIPFiles())                                                   // NOTE: kubeadm settings are not relevant for vcsim, but we are adding the same KCP used by other templates for sake of simplicity
+	kubeadmJoinTemplate := newKubeadmConfigTemplate(fmt.Sprintf("%s%s", env.ClusterNameVar, env.MachineDeploymentNameSuffix), true) // NOTE: kubeadm settings are not relevant for vcsim, but we are adding the same KCP used by other templates for sake of simplicity
+	cluster := newCluster(&vmwareCluster, &controlPlane)
+	machineDeployment := newMachineDeployment(cluster, &workerMachineTemplate, kubeadmJoinTemplate)
+	identitySecret := newIdentitySecret()
+	// Note: templates for vcsim do not require CRS for kube-vip, csi, cpi.
+
+	MultiNodeTemplate := []runtime.Object{
+		&cluster,
+		&vmwareCluster,
+		&cpMachineTemplate,
+		&workerMachineTemplate,
+		&controlPlane,
+		&kubeadmJoinTemplate,
+		&machineDeployment,
+		&identitySecret,
+	}
 
 	return MultiNodeTemplate, nil
 }

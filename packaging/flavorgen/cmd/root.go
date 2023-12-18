@@ -42,6 +42,8 @@ var (
 		flavors.ClusterTopology:      "cluster-template-topology.yaml",
 		flavors.Ignition:             "cluster-template-ignition.yaml",
 		flavors.NodeIPAM:             "cluster-template-node-ipam.yaml",
+		flavors.VCSIM:                "cluster-template-vcsim.yaml",
+		flavors.VCSIMSupervisor:      "cluster-template-vcsim-supervisor.yaml",
 	}
 
 	allFlavors = []string{
@@ -51,6 +53,7 @@ var (
 		flavors.Ignition,
 		flavors.NodeIPAM,
 		flavors.ClusterTopology,
+		// flavors.VCSIM and VCSIMSupervisor are not added here because it is for development only.
 	}
 )
 
@@ -164,6 +167,30 @@ func generateSingle(flavor string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+	case flavors.VCSIM:
+		var err error
+		objs, err = flavors.QuickStartVCSIM()
+		if err != nil {
+			return "", err
+		}
+		replacements = append(replacements, util.Replacement{
+			Kind:      "VSphereCluster",
+			Name:      "${CLUSTER_NAME}",
+			Value:     env.ControlPlaneEndpointPortVar,
+			FieldPath: []string{"spec", "controlPlaneEndpoint", "port"},
+		})
+	case flavors.VCSIMSupervisor:
+		var err error
+		objs, err = flavors.QuickStartVCSIMSupervisor()
+		if err != nil {
+			return "", err
+		}
+		replacements = append(replacements, util.Replacement{
+			Kind:      "VSphereCluster",
+			Name:      "${CLUSTER_NAME}",
+			Value:     env.ControlPlaneEndpointPortVar,
+			FieldPath: []string{"spec", "controlPlaneEndpoint", "port"},
+		})
 	default:
 		return "", errors.Errorf("invalid flavor")
 	}

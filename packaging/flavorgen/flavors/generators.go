@@ -29,9 +29,11 @@ import (
 	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1beta1"
 	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	addonsv1 "sigs.k8s.io/cluster-api/exp/addons/api/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/v1beta1"
+	vmwarev1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/vmware/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-vsphere/packaging/flavorgen/flavors/env"
 	"sigs.k8s.io/cluster-api-provider-vsphere/packaging/flavorgen/flavors/util"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/identity"
@@ -228,7 +230,26 @@ func newVSphereCluster() infrav1.VSphereCluster {
 	}
 }
 
-func newCluster(vsphereCluster infrav1.VSphereCluster, controlPlane *controlplanev1.KubeadmControlPlane) clusterv1.Cluster {
+func newVMWareCluster() vmwarev1.VSphereCluster {
+	return vmwarev1.VSphereCluster{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: vmwarev1.GroupVersion.String(),
+			Kind:       util.TypeToKind(&vmwarev1.VSphereCluster{}),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      env.ClusterNameVar,
+			Namespace: env.NamespaceVar,
+		},
+		Spec: vmwarev1.VSphereClusterSpec{
+			ControlPlaneEndpoint: clusterv1.APIEndpoint{
+				Host: env.ControlPlaneEndpointVar,
+				Port: 6443,
+			},
+		},
+	}
+}
+
+func newCluster(vsphereCluster client.Object, controlPlane *controlplanev1.KubeadmControlPlane) clusterv1.Cluster {
 	cluster := clusterv1.Cluster{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: clusterv1.GroupVersion.String(),
@@ -246,9 +267,9 @@ func newCluster(vsphereCluster infrav1.VSphereCluster, controlPlane *controlplan
 				},
 			},
 			InfrastructureRef: &corev1.ObjectReference{
-				APIVersion: vsphereCluster.GroupVersionKind().GroupVersion().String(),
-				Kind:       vsphereCluster.Kind,
-				Name:       vsphereCluster.Name,
+				APIVersion: vsphereCluster.GetObjectKind().GroupVersionKind().GroupVersion().String(),
+				Kind:       vsphereCluster.GetObjectKind().GroupVersionKind().Kind,
+				Name:       vsphereCluster.GetName(),
 			},
 		},
 	}
@@ -316,6 +337,37 @@ func defaultVirtualMachineCloneSpec() infrav1.VirtualMachineCloneSpec {
 		StoragePolicyName: env.VSphereStoragePolicyVar,
 		Folder:            env.VSphereFolderVar,
 		OS:                infrav1.Linux,
+	}
+}
+
+func newVMWareMachineTemplate(templateName string) vmwarev1.VSphereMachineTemplate {
+	return vmwarev1.VSphereMachineTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      templateName,
+			Namespace: env.NamespaceVar,
+		},
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: vmwarev1.GroupVersion.String(),
+			Kind:       util.TypeToKind(&vmwarev1.VSphereMachineTemplate{}),
+		},
+		Spec: vmwarev1.VSphereMachineTemplateSpec{
+			Template: vmwarev1.VSphereMachineTemplateResource{
+				Spec: defaultVMWareMachineSpec(),
+			},
+		},
+	}
+}
+
+func defaultVMWareMachineSpec() vmwarev1.VSphereMachineSpec {
+	return vmwarev1.VSphereMachineSpec{
+		// TODO: fill missing fields
+		FailureDomain:      nil,
+		ImageName:          "",
+		ClassName:          "",
+		StorageClass:       "",
+		Volumes:            nil,
+		PowerOffMode:       vmwarev1.VirtualMachinePowerOpModeTrySoft,
+		MinHardwareVersion: "",
 	}
 }
 
@@ -729,7 +781,7 @@ func newIdentitySecret() corev1.Secret {
 	}
 }
 
-func newMachineDeployment(cluster clusterv1.Cluster, machineTemplate infrav1.VSphereMachineTemplate, bootstrapTemplate bootstrapv1.KubeadmConfigTemplate) clusterv1.MachineDeployment {
+func newMachineDeployment(cluster clusterv1.Cluster, machineTemplate client.Object, bootstrapTemplate bootstrapv1.KubeadmConfigTemplate) clusterv1.MachineDeployment {
 	return clusterv1.MachineDeployment{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: clusterv1.GroupVersion.String(),
@@ -758,9 +810,9 @@ func newMachineDeployment(cluster clusterv1.Cluster, machineTemplate infrav1.VSp
 						},
 					},
 					InfrastructureRef: corev1.ObjectReference{
-						APIVersion: machineTemplate.GroupVersionKind().GroupVersion().String(),
-						Kind:       machineTemplate.Kind,
-						Name:       machineTemplate.Name,
+						APIVersion: machineTemplate.GetObjectKind().GroupVersionKind().GroupVersion().String(),
+						Kind:       machineTemplate.GetObjectKind().GroupVersionKind().Kind,
+						Name:       machineTemplate.GetName(),
 					},
 				},
 			},
@@ -778,7 +830,7 @@ func newKubeVIPFiles() []bootstrapv1.File {
 	}
 }
 
-func newKubeadmControlplane(infraTemplate infrav1.VSphereMachineTemplate, files []bootstrapv1.File) controlplanev1.KubeadmControlPlane {
+func newKubeadmControlplane(infraTemplate client.Object, files []bootstrapv1.File) controlplanev1.KubeadmControlPlane {
 	return controlplanev1.KubeadmControlPlane{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: controlplanev1.GroupVersion.String(),
@@ -792,9 +844,9 @@ func newKubeadmControlplane(infraTemplate infrav1.VSphereMachineTemplate, files 
 			Version: env.KubernetesVersionVar,
 			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
 				InfrastructureRef: corev1.ObjectReference{
-					APIVersion: infraTemplate.GroupVersionKind().GroupVersion().String(),
-					Kind:       infraTemplate.Kind,
-					Name:       infraTemplate.Name,
+					APIVersion: infraTemplate.GetObjectKind().GroupVersionKind().GroupVersion().String(),
+					Kind:       infraTemplate.GetObjectKind().GroupVersionKind().Kind,
+					Name:       infraTemplate.GetName(),
 				},
 			},
 			KubeadmConfigSpec: defaultKubeadmInitSpec(files),

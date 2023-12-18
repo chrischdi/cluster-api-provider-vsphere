@@ -21,13 +21,17 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"reflect"
 	goruntime "runtime"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
+	topologyv1 "github.com/vmware-tanzu/vm-operator/external/tanzu-topology/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	cliflag "k8s.io/component-base/cli/flag"
@@ -42,9 +46,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/v1beta1"
+	vmwarev1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/vmware/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/constants"
 	vcsimv1 "sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/api/v1alpha1"
 	"sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/controllers"
@@ -89,6 +95,7 @@ func init() {
 	_ = clusterv1.AddToScheme(scheme)
 	_ = infrav1.AddToScheme(scheme)
 	_ = vcsimv1.AddToScheme(scheme)
+	_ = topologyv1.AddToScheme(scheme)
 
 	// scheme used for operating on the cloud resource.
 	_ = corev1.AddToScheme(cloudScheme)
@@ -243,10 +250,16 @@ func main() {
 	// Setup the context that's going to be used in controllers and for the manager.
 	ctx := ctrl.SetupSignalHandler()
 
-	setupChecks(mgr)
-	setupIndexes(ctx, mgr)
-	setupReconcilers(ctx, mgr)
-	setupWebhooks(mgr)
+	supervisorMode, err := isSupervisor(mgr)
+	if err != nil {
+		setupLog.Error(err, "unable to detect supervisor mode")
+		os.Exit(1)
+	}
+
+	setupChecks(mgr, supervisorMode)
+	setupIndexes(ctx, mgr, supervisorMode)
+	setupReconcilers(ctx, mgr, supervisorMode)
+	setupWebhooks(mgr, supervisorMode)
 
 	setupLog.Info("starting manager", "version", version.Get().String())
 	if err := mgr.Start(ctx); err != nil {
@@ -255,7 +268,7 @@ func main() {
 	}
 }
 
-func setupChecks(mgr ctrl.Manager) {
+func setupChecks(mgr ctrl.Manager, _ bool) {
 	if err := mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker()); err != nil {
 		setupLog.Error(err, "unable to create ready check")
 		os.Exit(1)
@@ -267,10 +280,10 @@ func setupChecks(mgr ctrl.Manager) {
 	}
 }
 
-func setupIndexes(_ context.Context, _ ctrl.Manager) {
+func setupIndexes(_ context.Context, _ ctrl.Manager, _ bool) {
 }
 
-func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
+func setupReconcilers(ctx context.Context, mgr ctrl.Manager, supervisorMode bool) {
 	// Start cloud manager
 	cloudMgr := cloud.NewManager(cloudScheme)
 	if err := cloudMgr.Start(ctx); err != nil {
@@ -289,6 +302,7 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 	// Setup reconcilers
 	if err := (&controllers.VCenterReconciler{
 		Client:           mgr.GetClient(),
+		SupervisorMode:   supervisorMode,
 		WatchFilterValue: watchFilterValue,
 	}).SetupWithManager(ctx, mgr, concurrency(vCenterConcurrency)); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VCenterReconciler")
@@ -306,16 +320,18 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 		os.Exit(1)
 	}
 
-	if err := (&controllers.VSphereVMReconciler{
-		Client:            mgr.GetClient(),
-		CloudManager:      cloudMgr,
-		APIServerMux:      apiServerMux,
-		EnableKeepAlive:   enableKeepAlive,
-		KeepAliveDuration: keepAliveDuration,
-		WatchFilterValue:  watchFilterValue,
-	}).SetupWithManager(ctx, mgr, concurrency(vmConcurrency)); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "VSphereVMReconciler")
-		os.Exit(1)
+	if !supervisorMode {
+		if err := (&controllers.VSphereVMReconciler{
+			Client:            mgr.GetClient(),
+			CloudManager:      cloudMgr,
+			APIServerMux:      apiServerMux,
+			EnableKeepAlive:   enableKeepAlive,
+			KeepAliveDuration: keepAliveDuration,
+			WatchFilterValue:  watchFilterValue,
+		}).SetupWithManager(ctx, mgr, concurrency(vmConcurrency)); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "VSphereVMReconciler")
+			os.Exit(1)
+		}
 	}
 
 	if err := (&controllers.EnvSubstReconciler{
@@ -328,9 +344,31 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 	}
 }
 
-func setupWebhooks(_ ctrl.Manager) {
+func setupWebhooks(_ ctrl.Manager, _ bool) {
 }
 
 func concurrency(c int) controller.Options {
 	return controller.Options{MaxConcurrentReconciles: c}
+}
+
+func isSupervisor(mgr ctrl.Manager) (bool, error) {
+	gvr := vmwarev1.GroupVersion.WithResource(reflect.TypeOf(&vmwarev1.VSphereCluster{}).Elem().Name())
+	_, err := mgr.GetRESTMapper().KindFor(gvr)
+	if err != nil {
+		var discoveryErr *apiutil.ErrResourceDiscoveryFailed
+		ok := errors.As(errors.Unwrap(err), &discoveryErr)
+		if !ok {
+			return false, err
+		}
+		discoveryErrs := *discoveryErr
+		gvrErr, ok := discoveryErrs[gvr.GroupVersion()]
+		if !ok {
+			return false, err
+		}
+		if apierrors.IsNotFound(gvrErr) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }

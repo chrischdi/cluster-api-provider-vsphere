@@ -7,8 +7,18 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
+  - create
   - get
   - list
   - watch
@@ -62,6 +72,15 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - topology.tanzu.vmware.com
+  resources:
+  - availabilityzones
+  verbs:
+  - create
+  - get
+  - list
   - watch
 - apiGroups:
   - vcsim.infrastructure.cluster.x-k8s.io

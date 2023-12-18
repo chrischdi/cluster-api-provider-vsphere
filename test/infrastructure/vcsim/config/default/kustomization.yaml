@@ -3,6 +3,8 @@ namespace: capvsim-system
 namePrefix: capvsim-
 
 commonLabels:
+  # capvsim is not a provider, but by adding this label
+  # we can get this installed by Cluster APIs Tiltfile.
   cluster.x-k8s.io/provider: "infrastructure-vsphere-simulator"
 
 resources:

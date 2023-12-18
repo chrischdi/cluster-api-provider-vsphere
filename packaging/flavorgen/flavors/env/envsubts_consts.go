@@ -21,7 +21,6 @@ const (
 	ClusterNameVar               = "${CLUSTER_NAME}"
 	ClusterClassNameVar          = "${CLUSTER_CLASS_NAME}"
 	ControlPlaneMachineCountVar  = "${CONTROL_PLANE_MACHINE_COUNT}"
-	DefaultCloudProviderImage    = "gcr.io/cloud-provider-vsphere/cpi/release/manager:v1.2.1"
 	DefaultClusterCIDR           = "192.168.0.0/16"
 	DefaultDiskGiB               = 25
 	DefaultMemoryMiB             = 8192
@@ -46,6 +45,7 @@ const (
 	VSphereTemplateVar           = "${VSPHERE_TEMPLATE}"
 	WorkerMachineCountVar        = "${WORKER_MACHINE_COUNT}"
 	ControlPlaneEndpointVar      = "${CONTROL_PLANE_ENDPOINT_IP}"
+	ControlPlaneEndpointPortVar  = "${CONTROL_PLANE_ENDPOINT_PORT:=6443}"
 	// VipNetworkInterfaceVar defaults to an empty string to let kube-vip autodetect the interface.
 	VipNetworkInterfaceVar = "${VIP_NETWORK_INTERFACE:=\"\"}"
 	VSphereUsername        = "${VSPHERE_USERNAME}"

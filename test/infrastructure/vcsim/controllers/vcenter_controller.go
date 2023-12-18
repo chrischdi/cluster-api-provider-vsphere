@@ -29,11 +29,10 @@ import (
 
 	_ "github.com/dougm/pretty"
 	"github.com/pkg/errors"
-	"github.com/vmware/govmomi/govc/cli"
-	_ "github.com/vmware/govmomi/govc/vm"
-	pbmsimulator "github.com/vmware/govmomi/pbm/simulator"
-	"github.com/vmware/govmomi/simulator"
+	topologyv1 "github.com/vmware-tanzu/vm-operator/external/tanzu-topology/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -43,12 +42,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	"github.com/vmware/govmomi/govc/cli"
+	_ "github.com/vmware/govmomi/govc/vm"
+	pbmsimulator "github.com/vmware/govmomi/pbm/simulator"
+	"github.com/vmware/govmomi/simulator"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/session"
+
 	"sigs.k8s.io/cluster-api-provider-vsphere/internal/test/helpers/vcsim"
 	vcsimv1 "sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/api/v1alpha1"
 )
 
 type VCenterReconciler struct {
-	Client client.Client
+	Client         client.Client
+	SupervisorMode bool
 
 	vcsimInstances map[string]*vcsim.Simulator
 	lock           sync.RWMutex
@@ -59,6 +65,9 @@ type VCenterReconciler struct {
 
 // +kubebuilder:rbac:groups=vcsim.infrastructure.cluster.x-k8s.io,resources=vcenters,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=vcsim.infrastructure.cluster.x-k8s.io,resources=vcenters/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=topology.tanzu.vmware.com,resources=availabilityzones,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create
 
 func (r *VCenterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
 	log := ctrl.LoggerFrom(ctx)
@@ -207,6 +216,182 @@ func (r *VCenterReconciler) reconcileNormal(ctx context.Context, vCenter *vcsimv
 		vCenter.Status.Thumbprint = ThumbprintSHA1(cert)
 	}
 
+	if r.SupervisorMode {
+		// TODO: this code should be refactored somewhere else so it can be used in the E2E tests as well (when running against real vCenters)
+		//   in order to make it easier to do so, i'm defining local variables for all the info used down below.
+
+		const (
+			// copied from from vm-operator
+
+			ProviderConfigMapName    = "vsphere.provider.config.vmoperator.vmware.com"
+			vcPNIDKey                = "VcPNID"
+			vcPortKey                = "VcPort"
+			vcCredsSecretNameKey     = "VcCredsSecretName" //nolint:gosec
+			datacenterKey            = "Datacenter"
+			resourcePoolKey          = "ResourcePool"
+			folderKey                = "Folder"
+			datastoreKey             = "Datastore"
+			networkNameKey           = "Network"
+			scRequiredKey            = "StorageClassRequired"
+			useInventoryKey          = "UseInventoryAsContentSource"
+			insecureSkipTLSVerifyKey = "InsecureSkipTLSVerify"
+			caFilePathKey            = "CAFilePath"
+		)
+
+		supervisorConfigs := []struct {
+			host       string
+			username   string
+			password   string
+			thumbprint string
+
+			// supervisor is usually based on a single vCenter cluster
+			datacenter        string
+			cluster           string
+			folder            string
+			resourcePool      string
+			availabilityZones struct {
+				clusterComputeResourcePaths []string
+			}
+			vmOperator struct {
+				// This is the namespace where is deployed the vm-operator for this supervisor
+				namespace string
+			}
+		}{
+			// TODO: make this adapt to the changes in the model from the API
+			//  This config works for DC0/C0 in vcsim + a Tilt managed deployment
+			{
+				host:       vCenter.Status.Host,
+				username:   vCenter.Status.Username,
+				password:   vCenter.Status.Password,
+				thumbprint: vCenter.Status.Thumbprint,
+
+				datacenter:   "DC0",
+				cluster:      "/DC0/host/DC0_C0",
+				folder:       "/DC0/vm",
+				resourcePool: "/DC0/host/DC0_C0/Resources",
+
+				vmOperator: struct{ namespace string }{
+					namespace: "vmware-system-vmop", // This is where tilt deploys the vm-operator
+				},
+			},
+		}
+
+		for _, config := range supervisorConfigs {
+			// In order to run the vm-operator in standalone it is required to provide it with the dependencies it needs to work:
+			// - A set of objects/configurations in the vCenter cluster the vm-operator is pointing to
+			// - A set of Kubernetes object the vm-operator relies on
+
+			// Get a Client to VCenter
+			params := session.NewParams().
+				WithServer(config.host).
+				WithThumbprint(config.thumbprint).
+				WithUserInfo(config.username, config.password)
+
+			s, err := session.GetOrCreate(ctx, params)
+			if err != nil {
+				return ctrl.Result{}, errors.Wrapf(err, "failed to connect to VCSim Server instance to read compute clusters")
+			}
+
+			datacenter, err := s.Finder.Datacenter(ctx, config.datacenter)
+			if err != nil {
+				return ctrl.Result{}, errors.Wrapf(err, "failed to get datacenter %s", config.datacenter)
+			}
+
+			cluster, err := s.Finder.ClusterComputeResource(ctx, config.cluster)
+			if err != nil {
+				return ctrl.Result{}, errors.Wrapf(err, "failed to get cluster %s", config.cluster)
+			}
+
+			folder, err := s.Finder.Folder(ctx, config.folder)
+			if err != nil {
+				return ctrl.Result{}, errors.Wrapf(err, "failed to get folder %s", config.folder)
+			}
+
+			resourcePool, err := s.Finder.ResourcePool(ctx, config.resourcePool)
+			if err != nil {
+				return ctrl.Result{}, errors.Wrapf(err, "failed to get resourcePool %s", config.resourcePool)
+			}
+
+			// Create Availability zones CR
+			// We are creating one availability zone for the cluster as in the example cluster
+			// TODO: investigate what options exists to create availability zones,
+
+			availabilityZone := &topologyv1.AvailabilityZone{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(config.cluster, "/")), "_", "-"), "/", "-"),
+				},
+				Spec: topologyv1.AvailabilityZoneSpec{
+					ClusterComputeResourceMoId: cluster.Reference().Value,
+				},
+			}
+
+			if err := r.Client.Create(ctx, availabilityZone); err != nil {
+				if !apierrors.IsAlreadyExists(err) {
+					return ctrl.Result{}, errors.Wrapf(err, "failed to create availability zone %s", availabilityZone.Name)
+				}
+			}
+
+			// Create vm-operator Secret
+			// This secret contains credentials to access vCenter the vm-operator acts on.
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      ProviderConfigMapName, // using the same name of the config map for consistency.
+					Namespace: config.vmOperator.namespace,
+				},
+				Data: map[string][]byte{
+					"password": []byte(config.username),
+					"username": []byte(config.password),
+				},
+				Type: corev1.SecretTypeOpaque,
+			}
+			if err := r.Client.Create(ctx, secret); err != nil {
+				if !apierrors.IsAlreadyExists(err) {
+					return ctrl.Result{}, errors.Wrapf(err, "failed to create vm-operator Secret %s", secret.Name)
+				}
+			}
+
+			// Create vm-operator ConfigMap
+			// This ConfigMap contains settings for the vm-operator instance.
+
+			host, port, err := net.SplitHostPort(config.host)
+			if err != nil {
+				return ctrl.Result{}, errors.Wrapf(err, "failed to split host %s", config.host)
+			}
+
+			configMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      ProviderConfigMapName,
+					Namespace: config.vmOperator.namespace,
+				},
+				Data: map[string]string{
+					caFilePathKey: "", // Leaving this empty because we don't have (yet) a solution to inject a CA file into the vm-operator pod.
+					// Cluster exists in the example ConfigMap, but it is not defined as a const
+					// ContentSource exists in the example ConfigMap, but it is not defined as a const
+					// CtrlVmVmAATag exists in the example ConfigMap, but it is not defined as a const
+					datastoreKey:             "", // Doesn't exist in the example ConfigMap, but it is defined as a const // TODO: is it ok to leave it empty (Comment in the code says: Only set in simulated testing env) ?
+					datacenterKey:            datacenter.Reference().Value,
+					folderKey:                folder.Reference().Value, // Doesn't exist in the example ConfigMap, but it is defined as a const
+					insecureSkipTLSVerifyKey: "true",                   // Using this given that we don't have (yet) a solution to inject a CA file into the vm-operator pod.
+					// IsRestrictedNetwork exists in the example ConfigMap, but it is not defined as a const
+					networkNameKey:       "",                             // Doesn't exist in the example ConfigMap, but it is defined as a const // TODO: is it ok to leave it empty (Comment in the code says: Only set in simulated testing env) ?
+					resourcePoolKey:      resourcePool.Reference().Value, // Doesn't exist in the example ConfigMap, but it is defined as a const
+					scRequiredKey:        "true",
+					useInventoryKey:      "false", // This is the vale from the example config // TODO: investigate more
+					vcCredsSecretNameKey: secret.Name,
+					vcPNIDKey:            host,
+					vcPortKey:            port,
+					// VmVmAntiAffinityTagCategoryName exists in the example ConfigMap, but it is not defined as a const
+					// WorkerVmVmAATag exists in the example ConfigMap, but it is not defined as a const
+				},
+			}
+			if err := r.Client.Create(ctx, configMap); err != nil {
+				if !apierrors.IsAlreadyExists(err) {
+					return ctrl.Result{}, errors.Wrapf(err, "failed to create vm-operator ConfigMap %s", configMap.Name)
+				}
+			}
+		}
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -241,6 +426,7 @@ func (r *VCenterReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 	if err != nil {
 		return errors.Wrap(err, "failed setting up with a controller manager")
 	}
+
 	return nil
 }
 
