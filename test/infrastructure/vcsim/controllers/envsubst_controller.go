@@ -40,7 +40,8 @@ import (
 )
 
 type EnvSubstReconciler struct {
-	Client client.Client
+	Client         client.Client
+	SupervisorMode bool
 
 	PodIp   string
 	sshKeys map[string]string
@@ -180,6 +181,11 @@ func (r *EnvSubstReconciler) reconcileNormal(ctx context.Context, envSubst *vcsi
 		// variables to set up govc for working with the vcsim instance.
 		"GOVC_URL":      fmt.Sprintf("https://%s:%s@%s/sdk", vCenter.Status.Username, vCenter.Status.Password, strings.Replace(vCenter.Status.Host, r.PodIp, "127.0.0.1", 1)), // NOTE: reverting back to local host because the assumption is that the vcsim pod will be port-forwarded on local host
 		"GOVC_INSECURE": "true",
+	}
+
+	if r.SupervisorMode {
+		envSubst.Status.Variables["VSPHERE_STORAGE_POLICY"] = "vcsim-default" // TODO: check if we can use the same value for legacy
+		// TODO: add values for VSphereMachineTemplate.Spec
 	}
 
 	return ctrl.Result{}, nil

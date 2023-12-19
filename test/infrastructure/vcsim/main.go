@@ -27,10 +27,12 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
+	operatorv1 "github.com/vmware-tanzu/vm-operator/api/v1alpha1"
 	topologyv1 "github.com/vmware-tanzu/vm-operator/external/tanzu-topology/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -96,6 +98,8 @@ func init() {
 	_ = infrav1.AddToScheme(scheme)
 	_ = vcsimv1.AddToScheme(scheme)
 	_ = topologyv1.AddToScheme(scheme)
+	_ = operatorv1.AddToScheme(scheme)
+	_ = storagev1.AddToScheme(scheme)
 
 	// scheme used for operating on the cloud resource.
 	_ = corev1.AddToScheme(cloudScheme)
@@ -336,6 +340,7 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager, supervisorMode bool
 
 	if err := (&controllers.EnvSubstReconciler{
 		Client:           mgr.GetClient(),
+		SupervisorMode:   supervisorMode,
 		PodIp:            podIP,
 		WatchFilterValue: watchFilterValue,
 	}).SetupWithManager(ctx, mgr, concurrency(envsubstConcurrency)); err != nil {

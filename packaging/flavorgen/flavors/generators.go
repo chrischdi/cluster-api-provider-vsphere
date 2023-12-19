@@ -360,14 +360,14 @@ func newVMWareMachineTemplate(templateName string) vmwarev1.VSphereMachineTempla
 
 func defaultVMWareMachineSpec() vmwarev1.VSphereMachineSpec {
 	return vmwarev1.VSphereMachineSpec{
-		// TODO: fill missing fields
-		FailureDomain:      nil,
-		ImageName:          "",
-		ClassName:          "",
-		StorageClass:       "",
-		Volumes:            nil,
-		PowerOffMode:       vmwarev1.VirtualMachinePowerOpModeTrySoft,
-		MinHardwareVersion: "",
+		// TODO: use variables for envsubst
+		// FailureDomain:      nil,
+		ImageName:    "test-image-ovf",
+		ClassName:    "best-effort-2xlarge",
+		StorageClass: "vcsim-default",
+		// Volumes:            nil,
+		PowerOffMode: vmwarev1.VirtualMachinePowerOpModeTrySoft,
+		// MinHardwareVersion: "",
 	}
 }
 

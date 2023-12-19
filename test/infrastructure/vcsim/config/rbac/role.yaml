@@ -16,6 +16,15 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - resourcequotas
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - create
@@ -72,6 +81,15 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - storageclasses
+  verbs:
+  - create
+  - get
+  - list
   - watch
 - apiGroups:
   - topology.tanzu.vmware.com
@@ -133,3 +151,57 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - vmoperator.vmware.com
+  resources:
+  - contentlibraryproviders
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vmoperator.vmware.com
+  resources:
+  - contentsourcebindings
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vmoperator.vmware.com
+  resources:
+  - contentsources
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vmoperator.vmware.com
+  resources:
+  - virtualmachineclassbindings
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vmoperator.vmware.com
+  resources:
+  - virtualmachineclasses
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vmoperator.vmware.com
+  resources:
+  - virtualmachineimages
+  verbs:
+  - create
+  - get
+  - list
+  - watch
