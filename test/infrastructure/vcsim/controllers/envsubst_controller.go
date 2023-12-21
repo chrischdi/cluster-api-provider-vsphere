@@ -164,7 +164,7 @@ func (r *EnvSubstReconciler) reconcileNormal(ctx context.Context, envSubst *vcsi
 		"VSPHERE_NETWORK":            fmt.Sprintf("/DC%d/network/VM Network", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0)),                                                             // this is the default network that gets created. TODO: consider if to make it possible to create more (this requires changes to the API)
 		"VSPHERE_RESOURCE_POOL":      fmt.Sprintf("/DC%d/host/DC%[1]d_C%d/Resources", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0), pointer.IntDeref(envSubst.Spec.Cluster.Cluster, 0)), // all pool have RP as prefix. TODO: make it possible to pick one (0 --> Resources, >0 --> RPn)
 		"VSPHERE_STORAGE_POLICY":     "vSAN Default Storage Policy",
-		"VSPHERE_TEMPLATE":           fmt.Sprintf("/DC%d/vm/ubuntu-2204-kube-vX", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0)),
+		"VSPHERE_TEMPLATE":           fmt.Sprintf("/DC%d/vm/%s", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0), vcsimVMTemplateName),
 		"VSPHERE_SSH_AUTHORIZED_KEY": sshKey,
 
 		// other variables required by the cluster template.

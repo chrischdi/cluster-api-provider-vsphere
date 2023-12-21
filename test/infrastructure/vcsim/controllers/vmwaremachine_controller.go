@@ -23,17 +23,15 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	operatorv1 "github.com/vmware-tanzu/vm-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	capiutil "sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
-	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -41,15 +39,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/identity"
+	vmwarev1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/vmware/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/session"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/util"
 	"sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/server/capi/cloud"
-	cclient "sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/server/capi/cloud/runtime/client"
 	"sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/server/capi/server"
 )
 
-type VSphereVMReconciler struct {
+type VirtualMachineReconciler struct {
 	Client            client.Client
 	CloudManager      cloud.Manager
 	APIServerMux      *server.WorkloadClustersMux
@@ -60,21 +57,20 @@ type VSphereVMReconciler struct {
 	WatchFilterValue string
 }
 
-// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=vspherevms,verbs=get;list;watch;update;patch;delete
-// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=vsphereclusters,verbs=get;list;watch
-// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=vspheremachines,verbs=get;list;watch
-// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=vsphereclusteridentities,verbs=get;list;watch
+// +kubebuilder:rbac:groups=vmoperator.vmware.com,resources=virtualmachines,verbs=get;list;watch;update;patch;delete
+// +kubebuilder:rbac:groups=vmware.infrastructure.cluster.x-k8s.io,resources=vsphereclusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=vmware.infrastructure.cluster.x-k8s.io,resources=vspheremachines,verbs=get;list;watch
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 
 // Reconcile ensures the back-end state reflects the Kubernetes resource state intent.
-func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
+func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
 	log := ctrl.LoggerFrom(ctx)
 
-	// Fetch the VSphereVM instance
-	vSphereVM := &infrav1.VSphereVM{}
-	if err := r.Client.Get(ctx, req.NamespacedName, vSphereVM); err != nil {
+	// Fetch the VirtualMachine instance
+	virtualMachine := &operatorv1.VirtualMachine{}
+	if err := r.Client.Get(ctx, req.NamespacedName, virtualMachine); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
@@ -82,7 +78,7 @@ func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Fetch the owner VSphereMachine.
-	vSphereMachine, err := util.GetOwnerVSphereMachine(ctx, r.Client, vSphereVM.ObjectMeta)
+	vSphereMachine, err := util.GetOwnerVMWareMachine(ctx, r.Client, virtualMachine.ObjectMeta)
 	// vsphereMachine can be nil in cases where custom mover other than clusterctl
 	// moves the resources without ownerreferences set
 	// in that case nil vsphereMachine can cause panic and CrashLoopBackOff the pod
@@ -127,12 +123,12 @@ func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		Namespace: cluster.Namespace,
 		Name:      cluster.Spec.InfrastructureRef.Name,
 	}
-	vSphereCluster := &infrav1.VSphereCluster{}
-	if err := r.Client.Get(ctx, key, vSphereCluster); err != nil {
+	vsphereCluster := &vmwarev1.VSphereCluster{}
+	if err := r.Client.Get(ctx, key, vsphereCluster); err != nil {
 		log.Info("VSphereCluster can't be retrieved")
 		return ctrl.Result{}, err
 	}
-	log = log.WithValues("VSphereCluster", klog.KObj(vSphereCluster))
+	log = log.WithValues("VSphereCluster", klog.KObj(vsphereCluster))
 
 	ctx = ctrl.LoggerInto(ctx, log)
 
@@ -142,19 +138,19 @@ func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Check if there is a conditionsTracker in the resource group.
 	// The conditionsTracker is an object stored in memory with the scope of storing conditions used for keeping
-	// track of the provisioning process of the fake node, etcd, api server, etc for this specific vSphereVM.
+	// track of the provisioning process of the fake node, etcd, api server, etc for this specific virtualMachine.
 	// (the process managed by this controller).
 	cloudClient := r.CloudManager.GetResourceGroup(resourceGroup).GetClient()
 	conditionsTracker := &infrav1.VSphereVM{} // NOTE: The type of this object doesn't matter as soon as it implements Cluster API's conditions interfaces.
-	if err := cloudClient.Get(ctx, client.ObjectKeyFromObject(vSphereVM), conditionsTracker); err != nil {
+	if err := cloudClient.Get(ctx, client.ObjectKeyFromObject(virtualMachine), conditionsTracker); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, errors.Wrap(err, "failed to get conditionsTracker")
 		}
 
 		conditionsTracker = &infrav1.VSphereVM{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      vSphereVM.Name,
-				Namespace: vSphereVM.Namespace,
+				Name:      virtualMachine.Name,
+				Namespace: virtualMachine.Namespace,
 			},
 		}
 		if err := cloudClient.Create(ctx, conditionsTracker); err != nil {
@@ -163,7 +159,7 @@ func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Initialize the patch helper
-	patchHelper, err := patch.NewHelper(vSphereVM, r.Client)
+	patchHelper, err := patch.NewHelper(virtualMachine, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -171,7 +167,7 @@ func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Always attempt to Patch the VSphereVM + conditionsTracker object and status after each reconciliation.
 	defer func() {
 		// NOTE: Patch on VSphereVM will only add/remove a finalizer.
-		if err := patchHelper.Patch(ctx, vSphereVM); err != nil {
+		if err := patchHelper.Patch(ctx, virtualMachine); err != nil {
 			log.Error(err, "failed to patch VSphereVM")
 			if reterr == nil {
 				reterr = err
@@ -197,24 +193,23 @@ func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		// Type specific functions; those functions wraps the differences between legacy and supervisor types,
 		// thus allowing to use the same vmReconciler in both scenarios.
 		GetVCenterSession: func(ctx context.Context) (*session.Session, error) {
-			// Return a connection to the vCenter where the vSphereVM is hosted
-			return r.getVCenterSession(ctx, vSphereCluster, vSphereVM)
+			// Return a connection to the vCenter where the virtualMachine is hosted
+			return r.getVCenterSession(ctx)
 		},
 		IsVMWaitingforIP: func() bool {
-			// A vSphereVM is waiting for an IP when not ready VMProvisioned condition is false with reason WaitingForIPAllocation
-			return !vSphereVM.Status.Ready && conditions.IsFalse(vSphereVM, infrav1.VMProvisionedCondition) && conditions.GetReason(vSphereVM, infrav1.VMProvisionedCondition) == infrav1.WaitingForIPAllocationReason
+			// A virtualMachine is waiting for an IP when PoweredOn but without an Ip.
+			return virtualMachine.Status.PowerState == operatorv1.VirtualMachinePoweredOn && virtualMachine.Status.VmIp == ""
 		},
 		IsVMReady: func() bool {
-			// A vSphereVM is ready to provision fake objects hosted on it when both ready and BiosUUID is set (bios id is required when provisioning the node to compute the Provider ID)
-			return vSphereVM.Status.Ready && vSphereVM.Spec.BiosUUID != ""
+			// A virtualMachine is ready to provision fake objects hosted on it when PoweredOn and with a primary Ip assigned.
+			return virtualMachine.Status.PowerState == operatorv1.VirtualMachinePoweredOn && virtualMachine.Status.VmIp != ""
 		},
 		GetProviderID: func() string {
-			// Computes the ProviderID for the node hosted on the vSphereVM
-			return util.ConvertUUIDToProviderID(vSphereVM.Spec.BiosUUID)
+			// Computes the ProviderID for the node hosted on the virtualMachine
+			return util.ConvertUUIDToProviderID(virtualMachine.Status.BiosUUID)
 		},
 		GetVMPath: func() string {
-			// Return the path where the VM is stored.
-			return path.Join(vSphereVM.Spec.Folder, vSphereVM.Name)
+			return path.Join("/DC0/vm", cluster.Name, virtualMachine.Name)
 		},
 	}
 
@@ -225,8 +220,8 @@ func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Add finalizer first if not set to avoid the race condition between init and delete.
 	// Note: Finalizers in general can only be added when the deletionTimestamp is not set.
-	if !controllerutil.ContainsFinalizer(vSphereVM, VMFinalizer) {
-		controllerutil.AddFinalizer(vSphereVM, VMFinalizer)
+	if !controllerutil.ContainsFinalizer(virtualMachine, VMFinalizer) {
+		controllerutil.AddFinalizer(virtualMachine, VMFinalizer)
 		return ctrl.Result{}, nil
 	}
 
@@ -234,21 +229,43 @@ func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return vmR.reconcileNormal(ctx, cluster, machine, conditionsTracker)
 }
 
-func (r VSphereVMReconciler) getVCenterSession(ctx context.Context, vSphereCluster *infrav1.VSphereCluster, vSphereVM *infrav1.VSphereVM) (*session.Session, error) {
-	if vSphereCluster.Spec.IdentityRef == nil {
-		return nil, errors.New("vcsim do not support using credentials provided to the manager")
+func (r VirtualMachineReconciler) getVCenterSession(ctx context.Context) (*session.Session, error) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      netConfigMapName,
+			Namespace: "vmware-system-vmop", // This is where tilt deploys the vm-operator // TODO: think how to make this configurable by Cluster (or Namespace where a vm-operator instance points to)
+		},
+	}
+	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(secret), secret); err != nil {
+		return nil, errors.Wrapf(err, "failed to get vm-operator Secret %s", secret.Name)
 	}
 
-	creds, err := identity.GetCredentials(ctx, r.Client, vSphereCluster, "capv-system") // TODO: implement support for CAPV deployed in arbitrary ns (TBD if we need this)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to retrieve credentials from IdentityRef")
+	serverURL := string(secret.Data[netConfigServerURLKey])
+	if serverURL == "" {
+		return nil, errors.Errorf("%s value is missing from the vm-operator Secret %s", netConfigServerURLKey, secret.Name)
+	}
+	datacenter := string(secret.Data[netConfigDatacenterKey])
+	if datacenter == "" {
+		return nil, errors.Errorf("%s value is missing from the vm-operator Secret %s", netConfigDatacenterKey, secret.Name)
+	}
+	username := string(secret.Data[netConfigUsernameKey])
+	if username == "" {
+		return nil, errors.Errorf("%s value is missing from the vm-operator Secret %s", netConfigUsernameKey, secret.Name)
+	}
+	password := string(secret.Data[netConfigPasswordKey])
+	if password == "" {
+		return nil, errors.Errorf("%s value is missing from the vm-operator Secret %s", netConfigPasswordKey, secret.Name)
+	}
+	thumbprint := string(secret.Data[netConfigThumbprintKey])
+	if thumbprint == "" {
+		return nil, errors.Errorf("%s value is missing from the vm-operator Secret %s", netConfigThumbprintKey, secret.Name)
 	}
 
 	params := session.NewParams().
-		WithServer(vSphereVM.Spec.Server).
-		WithDatacenter(vSphereVM.Spec.Datacenter).
-		WithUserInfo(creds.Username, creds.Password).
-		WithThumbprint(vSphereVM.Spec.Thumbprint).
+		WithServer(serverURL).
+		WithDatacenter(datacenter).
+		WithUserInfo(username, password).
+		WithThumbprint(thumbprint).
 		WithFeatures(session.Feature{
 			EnableKeepAlive:   r.EnableKeepAlive,
 			KeepAliveDuration: r.KeepAliveDuration,
@@ -258,64 +275,15 @@ func (r VSphereVMReconciler) getVCenterSession(ctx context.Context, vSphereClust
 }
 
 // SetupWithManager will add watches for this controller.
-func (r *VSphereVMReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
+func (r *VirtualMachineReconciler) SetupWithManager(_ context.Context, mgr ctrl.Manager, options controller.Options) error {
 	err := ctrl.NewControllerManagedBy(mgr).
-		For(&infrav1.VSphereVM{}).
+		For(&operatorv1.VirtualMachine{}).
 		WithOptions(options).
-		WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue)).
+		// WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue)). // TODO: check if we need this
 		Complete(r)
 
 	if err != nil {
 		return errors.Wrap(err, "failed setting up with a controller manager")
 	}
 	return nil
-}
-
-func (r *VSphereVMReconciler) getEtcdInfo(ctx context.Context, cloudClient cclient.Client) (etcdInfo, error) {
-	etcdPods := &corev1.PodList{}
-	if err := cloudClient.List(ctx, etcdPods,
-		client.InNamespace(metav1.NamespaceSystem),
-		client.MatchingLabels{
-			"component": "etcd",
-			"tier":      "control-plane"},
-	); err != nil {
-		return etcdInfo{}, errors.Wrap(err, "failed to list etcd members")
-	}
-
-	if len(etcdPods.Items) == 0 {
-		return etcdInfo{}, nil
-	}
-
-	info := etcdInfo{
-		members: sets.New[string](),
-	}
-	var leaderFrom time.Time
-	for _, pod := range etcdPods.Items {
-		if _, ok := pod.Annotations[EtcdMemberRemoved]; ok {
-			continue
-		}
-		if info.clusterID == "" {
-			info.clusterID = pod.Annotations[EtcdClusterIDAnnotationName]
-		} else if pod.Annotations[EtcdClusterIDAnnotationName] != info.clusterID {
-			return etcdInfo{}, errors.New("invalid etcd cluster, members have different cluster ID")
-		}
-		memberID := pod.Annotations[EtcdMemberIDAnnotationName]
-		info.members.Insert(memberID)
-
-		if t, err := time.Parse(time.RFC3339, pod.Annotations[EtcdLeaderFromAnnotationName]); err == nil {
-			if t.After(leaderFrom) {
-				info.leaderID = memberID
-				leaderFrom = t
-			}
-		}
-	}
-
-	if info.leaderID == "" {
-		// TODO: consider if and how to automatically recover from this case
-		//  note: this can happen also when reading etcd members in the server, might be it is something we have to take case before deletion...
-		//  for now it should not be an issue because KCP forward etcd leadership before deletion.
-		return etcdInfo{}, errors.New("invalid etcd cluster, no leader found")
-	}
-
-	return info, nil
 }

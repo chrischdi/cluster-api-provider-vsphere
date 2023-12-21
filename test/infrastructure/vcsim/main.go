@@ -100,6 +100,7 @@ func init() {
 	_ = topologyv1.AddToScheme(scheme)
 	_ = operatorv1.AddToScheme(scheme)
 	_ = storagev1.AddToScheme(scheme)
+	_ = vmwarev1.AddToScheme(scheme)
 
 	// scheme used for operating on the cloud resource.
 	_ = corev1.AddToScheme(cloudScheme)
@@ -324,7 +325,19 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager, supervisorMode bool
 		os.Exit(1)
 	}
 
-	if !supervisorMode {
+	if supervisorMode {
+		if err := (&controllers.VirtualMachineReconciler{
+			Client:            mgr.GetClient(),
+			CloudManager:      cloudMgr,
+			APIServerMux:      apiServerMux,
+			EnableKeepAlive:   enableKeepAlive,
+			KeepAliveDuration: keepAliveDuration,
+			WatchFilterValue:  watchFilterValue,
+		}).SetupWithManager(ctx, mgr, concurrency(vmConcurrency)); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineReconciler")
+			os.Exit(1)
+		}
+	} else {
 		if err := (&controllers.VSphereVMReconciler{
 			Client:            mgr.GetClient(),
 			CloudManager:      cloudMgr,

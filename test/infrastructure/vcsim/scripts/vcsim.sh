@@ -73,7 +73,7 @@ EOF
 fi
 
 while true; do
-    status=$(kubectl get envsubst $2 -o json | jq ".status")
+    status=$(kubectl get envsubst $2 -o json | jq ".status" 2> /dev/null)
     if [ ! -z "$status" ]; then
       break
     fi
@@ -90,5 +90,6 @@ done
 kubectl get envsubst $2 -o json | jq ".status.variables | to_entries | map(\"export \\(.key)=\\\"\\(.value|tostring)\\\"\") | .[]" -r > vcsim.env
 
 echo "done!"
+echo $(kubectl get envsubst cluster1  -o json | jq -r ".status.variables.VSPHERE_SERVER")
 echo
 echo "source vcsim.env"

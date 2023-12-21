@@ -17,16 +17,10 @@ package controllers
 
 import (
 	"context"
-	"fmt"
-	"path"
 	"testing"
 	"time"
 
 	. "github.com/onsi/gomega"
-	"github.com/vmware/govmomi/object"
-	"github.com/vmware/govmomi/pbm"
-	pbmTypes "github.com/vmware/govmomi/pbm/types"
-	vim25types "github.com/vmware/govmomi/vim25/types"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -42,7 +36,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/session"
 	vcsimv1 "sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/api/v1alpha1"
 	"sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/server/capi/cloud"
 	"sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/server/capi/server"
@@ -164,15 +157,15 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(res).To(Equal(ctrl.Result{}))
 
-		// Check the mirrorVSphereVM is waiting for infrastructure ready
-		mirrorVSphereVM := &infrav1.VSphereVM{}
-		err = cloudClient.Get(ctx, client.ObjectKeyFromObject(vSphereVM), mirrorVSphereVM)
+		// Check the conditionsTracker is waiting for infrastructure ready
+		conditionsTracker := &infrav1.VSphereVM{}
+		err = cloudClient.Get(ctx, client.ObjectKeyFromObject(vSphereVM), conditionsTracker)
 		g.Expect(err).ToNot(HaveOccurred())
 
-		c := conditions.Get(mirrorVSphereVM, NodeProvisionedCondition)
+		c := conditions.Get(conditionsTracker, VMProvisionedCondition)
 		g.Expect(c.Status).To(Equal(corev1.ConditionFalse))
 		g.Expect(c.Severity).To(Equal(clusterv1.ConditionSeverityInfo))
-		g.Expect(c.Reason).To(Equal(WaitingForVMInfrastructureReason))
+		g.Expect(c.Reason).To(Equal(WaitingControlPlaneInitializedReason))
 	})
 
 	t.Run("VSphereMachine provisioned gets a node (worker)", func(t *testing.T) {
@@ -296,96 +289,13 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 
 		// Check the mirrorVSphereMachine reports all provisioned
 
-		mirrorVSphereVM := &infrav1.VSphereVM{}
-		err = cloudClient.Get(ctx, client.ObjectKeyFromObject(vSphereVM), mirrorVSphereVM)
+		conditionsTracker := &infrav1.VSphereVM{}
+		err = cloudClient.Get(ctx, client.ObjectKeyFromObject(vSphereVM), conditionsTracker)
 		g.Expect(err).ToNot(HaveOccurred())
 
-		c := conditions.Get(mirrorVSphereVM, NodeProvisionedCondition)
+		c := conditions.Get(conditionsTracker, NodeProvisionedCondition)
 		g.Expect(c.Status).To(Equal(corev1.ConditionTrue))
 
 		// TODO: check all the other conditions, the in memory objects actually exists, API server and etcd started etc.
 	})
-}
-
-func Test_FOO(t *testing.T) {
-	g := NewWithT(t)
-
-	vCenter := &vcsimv1.VCenter{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: metav1.NamespaceDefault,
-			Name:      "foo",
-			Finalizers: []string{
-				vcsimv1.VCenterFinalizer, // Adding this to move past the first reconcile
-			},
-		},
-		Spec: vcsimv1.VCCenterSpec{},
-	}
-
-	crclient := fake.NewClientBuilder().WithObjects(vCenter).WithStatusSubresource(vCenter).WithScheme(scheme).Build()
-	r := &VCenterReconciler{
-		Client: crclient,
-	}
-
-	// PART 1: Should create a new VCenter
-
-	res, err := r.Reconcile(ctx, ctrl.Request{types.NamespacedName{
-		Namespace: vCenter.Namespace,
-		Name:      vCenter.Name,
-	}})
-	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res).To(Equal(ctrl.Result{}))
-
-	// Gets the reconciled object and tests if the VCenter instance actually works
-	err = crclient.Get(ctx, client.ObjectKeyFromObject(vCenter), vCenter)
-	g.Expect(err).ToNot(HaveOccurred())
-
-	params := session.NewParams().
-		WithServer(vCenter.Status.Host).
-		WithThumbprint(vCenter.Status.Thumbprint).
-		WithUserInfo(vCenter.Status.Username, vCenter.Status.Password)
-
-	s, err := session.GetOrCreate(ctx, params)
-	g.Expect(err).ToNot(HaveOccurred())
-
-	pbmClient, err := pbm.NewClient(ctx, s.Client.Client)
-	g.Expect(err).ToNot(HaveOccurred())
-
-	folder, err := s.Finder.FolderOrDefault(ctx, "/DC0/vm")
-	g.Expect(err).ToNot(HaveOccurred())
-
-	inventoryPath := path.Join(folder.InventoryPath, "ubuntu-2204-kube-vX")
-	vm, err := s.Finder.VirtualMachine(ctx, inventoryPath)
-	g.Expect(err).ToNot(HaveOccurred())
-
-	Obj := object.NewVirtualMachine(s.Client.Client, vm.Reference())
-
-	devices, err := Obj.Device(ctx)
-	g.Expect(err).ToNot(HaveOccurred())
-
-	disksRefs := make([]pbmTypes.PbmServerObjectRef, 0)
-	// diskMap is just an auxiliar map so we don't need to iterate over and over disks to get their configs
-	// if we realize they are not on the right storage policy
-	diskMap := make(map[string]*vim25types.VirtualDisk)
-
-	disks := devices.SelectByType((*vim25types.VirtualDisk)(nil))
-
-	// We iterate over disks and create an array of disks refs, so we just need to make a single call
-	// against vCenter, instead of one call per disk
-	// the diskMap is an auxiliar way of, besides the disksRefs, we have a "searchable" disk configuration
-	// in case we need to reconfigure a disk, to get its config
-	for _, d := range disks {
-		disk := d.(*vim25types.VirtualDisk)
-		// entities associated with storage policy has key in the form <vm-ID>:<disk>
-		diskID := fmt.Sprintf("%s:%d", Obj.Reference().Value, disk.Key)
-		diskMap[diskID] = disk
-
-		disksRefs = append(disksRefs, pbmTypes.PbmServerObjectRef{
-			ObjectType: string(pbmTypes.PbmObjectTypeVirtualDiskId),
-			Key:        diskID,
-		})
-	}
-
-	diskObjects, err := pbmClient.QueryAssociatedProfiles(ctx, disksRefs)
-	g.Expect(err).ToNot(HaveOccurred())
-	fmt.Print(diskObjects)
 }
