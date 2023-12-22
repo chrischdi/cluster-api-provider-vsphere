@@ -21,17 +21,17 @@ import (
 )
 
 const (
-	// FakeAPIServerEndpointFinalizer allows FakeAPIServerEndpointReconciler to clean up resources associated with FakeAPIServerEndpoint before
+	// ControlPlaneEndpointFinalizer allows ControlPlaneEndpointReconciler to clean up resources associated with ControlPlaneEndpoint before
 	// removing it from the API server.
-	FakeAPIServerEndpointFinalizer = "fakeapiserverendpoint.vcsim.infrastructure.cluster.x-k8s.io"
+	ControlPlaneEndpointFinalizer = "control-plane-endpoint.vcsim.infrastructure.cluster.x-k8s.io"
 )
 
-// FakeAPIServerEndpointSpec defines the desired state of the FakeAPIServerEndpoint.
-type FakeAPIServerEndpointSpec struct {
+// ControlPlaneEndpointSpec defines the desired state of the ControlPlaneEndpoint.
+type ControlPlaneEndpointSpec struct {
 }
 
-// FakeAPIServerEndpointStatus defines the observed state of the FakeAPIServerEndpoint.
-type FakeAPIServerEndpointStatus struct {
+// ControlPlaneEndpointStatus defines the observed state of the ControlPlaneEndpoint.
+type ControlPlaneEndpointStatus struct {
 	// The control plane host.
 	Host string `json:"host,omitempty"`
 
@@ -39,29 +39,30 @@ type FakeAPIServerEndpointStatus struct {
 	Port int `json:"port,omitempty"`
 }
 
-// +kubebuilder:resource:path=fakeapiserverendpoints,scope=Namespaced,categories=cluster-api
+// +kubebuilder:resource:path=controlplaneendpoints,scope=Namespaced,categories=cluster-api
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
 // +kubebuilder:object:root=true
 
-// FakeAPIServerEndpoint is the schema for a VCenter simulator server.
-type FakeAPIServerEndpoint struct {
+// ControlPlaneEndpoint is the schema for a cluster virtual ip.
+// IMPORTANT: The name of the ControlPlaneEndpoint should match the name of the cluster.
+type ControlPlaneEndpoint struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   FakeAPIServerEndpointSpec   `json:"spec,omitempty"`
-	Status FakeAPIServerEndpointStatus `json:"status,omitempty"`
+	Spec   ControlPlaneEndpointSpec   `json:"spec,omitempty"`
+	Status ControlPlaneEndpointStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// FakeAPIServerEndpointList contains a list of FakeAPIServerEndpoint.
-type FakeAPIServerEndpointList struct {
+// ControlPlaneEndpointList contains a list of ControlPlaneEndpoint.
+type ControlPlaneEndpointList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []FakeAPIServerEndpoint `json:"items"`
+	Items           []ControlPlaneEndpoint `json:"items"`
 }
 
 func init() {
-	objectTypes = append(objectTypes, &FakeAPIServerEndpoint{}, &FakeAPIServerEndpointList{})
+	objectTypes = append(objectTypes, &ControlPlaneEndpoint{}, &ControlPlaneEndpointList{})
 }

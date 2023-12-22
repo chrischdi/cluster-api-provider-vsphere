@@ -16,17 +16,13 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	. "github.com/onsi/gomega"
 	operatorv1 "github.com/vmware-tanzu/vm-operator/api/v1alpha1"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/pointer"
@@ -38,38 +34,15 @@ import (
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/v1beta1"
 	vmwarev1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/vmware/v1beta1"
-	vcsimv1 "sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/api/v1alpha1"
 	"sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/server/capi/cloud"
 	"sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/server/capi/server"
 )
 
-var (
-	cloudScheme = runtime.NewScheme()
-	scheme      = runtime.NewScheme()
-
-	ctx = context.Background()
-)
-
-func init() {
-	// scheme used for operating on the management cluster.
-	_ = clusterv1.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
-	_ = vmwarev1.AddToScheme(scheme)
-	_ = operatorv1.AddToScheme(scheme)
-	_ = vcsimv1.AddToScheme(scheme)
-
-	// scheme used for operating on the cloud resource.
-	_ = infrav1.AddToScheme(cloudScheme)
-	_ = corev1.AddToScheme(cloudScheme)
-	_ = appsv1.AddToScheme(cloudScheme)
-	_ = rbacv1.AddToScheme(cloudScheme)
-}
-
-func Test_Reconcile_VSphereVM(t *testing.T) {
-	t.Run("VSphereMachine not yet provisioned should be ignored", func(t *testing.T) {
+func Test_Reconcile_VirtualMachine(t *testing.T) {
+	t.Run("VirtualMachine not yet provisioned should be ignored", func(t *testing.T) {
 		g := NewWithT(t)
 
-		vsphereCluster := &infrav1.VSphereCluster{
+		vsphereCluster := &vmwarev1.VSphereCluster{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "foo",
 				Name:      "bar",
@@ -85,7 +58,7 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 			},
 			Spec: clusterv1.ClusterSpec{
 				InfrastructureRef: &corev1.ObjectReference{
-					APIVersion: infrav1.GroupVersion.String(),
+					APIVersion: vmwarev1.GroupVersion.String(),
 					Kind:       "VSphereCluster",
 					Namespace:  vsphereCluster.Namespace,
 					Name:       vsphereCluster.Name,
@@ -104,7 +77,7 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 			},
 		}
 
-		vSphereMachine := &infrav1.VSphereMachine{
+		vSphereMachine := &vmwarev1.VSphereMachine{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "foo",
 				Name:      "baz",
@@ -119,13 +92,13 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 			},
 		}
 
-		vSphereVM := &infrav1.VSphereVM{
+		virtualMachine := &operatorv1.VirtualMachine{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "foo",
 				Name:      "bar",
 				OwnerReferences: []metav1.OwnerReference{
 					{
-						APIVersion: infrav1.GroupVersion.String(),
+						APIVersion: vmwarev1.GroupVersion.String(),
 						Kind:       "VSphereMachine",
 						Name:       vSphereMachine.Name,
 						UID:        vSphereMachine.UID,
@@ -138,7 +111,7 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 		}
 
 		// Controller runtime client
-		crclient := fake.NewClientBuilder().WithObjects(cluster, vsphereCluster, machine, vSphereMachine, vSphereVM).WithScheme(scheme).Build()
+		crclient := fake.NewClientBuilder().WithObjects(cluster, vsphereCluster, machine, vSphereMachine, virtualMachine).WithScheme(scheme).Build()
 
 		// Start cloud manager & add a resourceGroup for the cluster
 		cloudMgr := cloud.NewManager(cloudScheme)
@@ -148,22 +121,22 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 		cloudMgr.AddResourceGroup(klog.KObj(cluster).String())
 		cloudClient := cloudMgr.GetResourceGroup(klog.KObj(cluster).String()).GetClient()
 
-		r := VSphereVMReconciler{
+		r := VirtualMachineReconciler{
 			Client:       crclient,
 			CloudManager: cloudMgr,
 		}
 
 		// Reconcile
 		res, err := r.Reconcile(ctx, ctrl.Request{types.NamespacedName{
-			Namespace: vSphereVM.Namespace,
-			Name:      vSphereVM.Name,
+			Namespace: virtualMachine.Namespace,
+			Name:      virtualMachine.Name,
 		}})
 		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(res).To(Equal(ctrl.Result{}))
 
 		// Check the conditionsTracker is waiting for infrastructure ready
 		conditionsTracker := &infrav1.VSphereVM{}
-		err = cloudClient.Get(ctx, client.ObjectKeyFromObject(vSphereVM), conditionsTracker)
+		err = cloudClient.Get(ctx, client.ObjectKeyFromObject(virtualMachine), conditionsTracker)
 		g.Expect(err).ToNot(HaveOccurred())
 
 		c := conditions.Get(conditionsTracker, VMProvisionedCondition)
@@ -172,10 +145,10 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 		g.Expect(c.Reason).To(Equal(WaitingControlPlaneInitializedReason))
 	})
 
-	t.Run("VSphereMachine provisioned gets a node (worker)", func(t *testing.T) {
+	t.Run("VirtualMachine provisioned gets a node (worker)", func(t *testing.T) {
 		g := NewWithT(t)
 
-		vsphereCluster := &infrav1.VSphereCluster{
+		vsphereCluster := &vmwarev1.VSphereCluster{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "foo",
 				Name:      "bar",
@@ -191,7 +164,7 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 			},
 			Spec: clusterv1.ClusterSpec{
 				InfrastructureRef: &corev1.ObjectReference{
-					APIVersion: infrav1.GroupVersion.String(),
+					APIVersion: vmwarev1.GroupVersion.String(),
 					Kind:       "VSphereCluster",
 					Namespace:  vsphereCluster.Namespace,
 					Name:       vsphereCluster.Name,
@@ -215,7 +188,7 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 			},
 		}
 
-		vSphereMachine := &infrav1.VSphereMachine{
+		vSphereMachine := &vmwarev1.VSphereMachine{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "foo",
 				Name:      "bar",
@@ -230,13 +203,13 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 			},
 		}
 
-		vSphereVM := &infrav1.VSphereVM{
+		virtualMachine := &operatorv1.VirtualMachine{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "foo",
 				Name:      "bar",
 				OwnerReferences: []metav1.OwnerReference{
 					{
-						APIVersion: infrav1.GroupVersion.String(),
+						APIVersion: vmwarev1.GroupVersion.String(),
 						Kind:       "VSphereMachine",
 						Name:       vSphereMachine.Name,
 						UID:        vSphereMachine.UID,
@@ -246,16 +219,16 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 					VMFinalizer, // Adding this to move past the first reconcile
 				},
 			},
-			Spec: infrav1.VSphereVMSpec{
-				BiosUUID: "foo", // This unblocks provisioning of node
-			},
-			Status: infrav1.VSphereVMStatus{
-				Ready: true, // This unblocks provisioning of node
+			Status: operatorv1.VirtualMachineStatus{
+				// Those values are required to unblock provisioning of node
+				BiosUUID:   "foo",
+				VmIp:       "1.2.3.4",
+				PowerState: operatorv1.VirtualMachinePoweredOn,
 			},
 		}
 
 		// Controller runtime client
-		crclient := fake.NewClientBuilder().WithObjects(cluster, vsphereCluster, machine, vSphereMachine, vSphereVM).WithScheme(scheme).Build()
+		crclient := fake.NewClientBuilder().WithObjects(cluster, vsphereCluster, machine, vSphereMachine, virtualMachine).WithScheme(scheme).Build()
 
 		// Start cloud manager & add a resourceGroup for the cluster
 		cloudMgr := cloud.NewManager(cloudScheme)
@@ -269,7 +242,7 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 		apiServerMux, err := server.NewWorkloadClustersMux(cloudMgr, "127.0.0.1")
 		g.Expect(err).ToNot(HaveOccurred())
 
-		r := VSphereVMReconciler{
+		r := VirtualMachineReconciler{
 			Client:       crclient,
 			CloudManager: cloudMgr,
 			APIServerMux: apiServerMux,
@@ -279,8 +252,8 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 		nodeStartupDuration = 0 * time.Second
 
 		res, err := r.Reconcile(ctx, ctrl.Request{types.NamespacedName{
-			Namespace: vSphereVM.Namespace,
-			Name:      vSphereVM.Name,
+			Namespace: virtualMachine.Namespace,
+			Name:      virtualMachine.Name,
 		}})
 		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(res).To(Equal(ctrl.Result{}))
@@ -288,7 +261,7 @@ func Test_Reconcile_VSphereVM(t *testing.T) {
 		// Check the mirrorVSphereMachine reports all provisioned
 
 		conditionsTracker := &infrav1.VSphereVM{}
-		err = cloudClient.Get(ctx, client.ObjectKeyFromObject(vSphereVM), conditionsTracker)
+		err = cloudClient.Get(ctx, client.ObjectKeyFromObject(virtualMachine), conditionsTracker)
 		g.Expect(err).ToNot(HaveOccurred())
 
 		c := conditions.Get(conditionsTracker, NodeProvisionedCondition)

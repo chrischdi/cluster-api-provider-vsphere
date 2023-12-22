@@ -80,19 +80,19 @@ func (r *EnvSubstReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_
 	}
 	log = log.WithValues("VCenter", klog.KObj(vCenter))
 
-	// Fetch the FakeAPIServerEndpoint instance
+	// Fetch the ControlPlaneEndpoint instance
 	if envSubst.Spec.Cluster.Name == "" {
 		return ctrl.Result{}, errors.New("Spec.Cluster.Name cannot be empty")
 	}
 
-	fakeAPIServerEndpoint := &vcsimv1.FakeAPIServerEndpoint{}
+	controlPlaneEndpoint := &vcsimv1.ControlPlaneEndpoint{}
 	if err := r.Client.Get(ctx, client.ObjectKey{
 		Namespace: envSubst.Namespace,
 		Name:      envSubst.Spec.Cluster.Name,
-	}, fakeAPIServerEndpoint); err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to get FakeAPIServerEndpoint")
+	}, controlPlaneEndpoint); err != nil {
+		return ctrl.Result{}, errors.Wrapf(err, "failed to get ControlPlaneEndpoint")
 	}
-	log = log.WithValues("FakeAPIServerEndpoint", klog.KObj(fakeAPIServerEndpoint))
+	log = log.WithValues("ControlPlaneEndpoint", klog.KObj(controlPlaneEndpoint))
 
 	ctx = ctrl.LoggerInto(ctx, log)
 
@@ -113,15 +113,15 @@ func (r *EnvSubstReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_
 	}()
 
 	// Handle deleted EnvSubst
-	if !fakeAPIServerEndpoint.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, envSubst, vCenter, fakeAPIServerEndpoint)
+	if !controlPlaneEndpoint.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, envSubst, vCenter, controlPlaneEndpoint)
 	}
 
 	// Handle non-deleted EnvSubst
-	return r.reconcileNormal(ctx, envSubst, vCenter, fakeAPIServerEndpoint)
+	return r.reconcileNormal(ctx, envSubst, vCenter, controlPlaneEndpoint)
 }
 
-func (r *EnvSubstReconciler) reconcileNormal(ctx context.Context, envSubst *vcsimv1.EnvSubst, vCenter *vcsimv1.VCenter, fakeAPIServerEndpoint *vcsimv1.FakeAPIServerEndpoint) (ctrl.Result, error) {
+func (r *EnvSubstReconciler) reconcileNormal(ctx context.Context, envSubst *vcsimv1.EnvSubst, vCenter *vcsimv1.VCenter, controlPlaneEndpoint *vcsimv1.ControlPlaneEndpoint) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	log.Info("Reconciling VCSim ControlPlaneEndpoint")
 
@@ -152,19 +152,13 @@ func (r *EnvSubstReconciler) reconcileNormal(ctx context.Context, envSubst *vcsi
 		log.Info("Created ssh authorized key")
 	}
 
+	// Common variables (used both in supervisor and legacy mode)
 	envSubst.Status.Variables = map[string]string{
 		// cluster template variables about the vcsim instance.
-		"VSPHERE_SERVER":             fmt.Sprintf("https://%s", vCenter.Status.Host),
-		"VSPHERE_PASSWORD":           vCenter.Status.Password,
-		"VSPHERE_USERNAME":           vCenter.Status.Username,
-		"VSPHERE_TLS_THUMBPRINT":     vCenter.Status.Thumbprint,
-		"VSPHERE_DATACENTER":         fmt.Sprintf("DC%d", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0)),
-		"VSPHERE_DATASTORE":          fmt.Sprintf("LocalDS_%d", pointer.IntDeref(envSubst.Spec.Cluster.Datastore, 0)),
-		"VSPHERE_FOLDER":             fmt.Sprintf("/DC%d/vm", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0)),                                                                             // this is the default folder that gets created. TODO: consider if to make it possible to create more (this requires changes to the API)
-		"VSPHERE_NETWORK":            fmt.Sprintf("/DC%d/network/VM Network", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0)),                                                             // this is the default network that gets created. TODO: consider if to make it possible to create more (this requires changes to the API)
-		"VSPHERE_RESOURCE_POOL":      fmt.Sprintf("/DC%d/host/DC%[1]d_C%d/Resources", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0), pointer.IntDeref(envSubst.Spec.Cluster.Cluster, 0)), // all pool have RP as prefix. TODO: make it possible to pick one (0 --> Resources, >0 --> RPn)
-		"VSPHERE_STORAGE_POLICY":     "vSAN Default Storage Policy",
-		"VSPHERE_TEMPLATE":           fmt.Sprintf("/DC%d/vm/%s", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0), vcsimVMTemplateName),
+		"VSPHERE_PASSWORD": vCenter.Status.Password,
+		"VSPHERE_USERNAME": vCenter.Status.Username,
+
+		// Variables for machines ssh key
 		"VSPHERE_SSH_AUTHORIZED_KEY": sshKey,
 
 		// other variables required by the cluster template.
@@ -175,8 +169,8 @@ func (r *EnvSubstReconciler) reconcileNormal(ctx context.Context, envSubst *vcsi
 		"WORKER_MACHINE_COUNT":        strconv.Itoa(pointer.IntDeref(envSubst.Spec.Cluster.WorkerMachines, 1)),
 
 		// variables for the fake APIServer endpoint
-		"CONTROL_PLANE_ENDPOINT_IP":   fakeAPIServerEndpoint.Status.Host,
-		"CONTROL_PLANE_ENDPOINT_PORT": strconv.Itoa(fakeAPIServerEndpoint.Status.Port),
+		"CONTROL_PLANE_ENDPOINT_IP":   controlPlaneEndpoint.Status.Host,
+		"CONTROL_PLANE_ENDPOINT_PORT": strconv.Itoa(controlPlaneEndpoint.Status.Port),
 
 		// variables to set up govc for working with the vcsim instance.
 		"GOVC_URL":      fmt.Sprintf("https://%s:%s@%s/sdk", vCenter.Status.Username, vCenter.Status.Password, strings.Replace(vCenter.Status.Host, r.PodIp, "127.0.0.1", 1)), // NOTE: reverting back to local host because the assumption is that the vcsim pod will be port-forwarded on local host
@@ -184,14 +178,32 @@ func (r *EnvSubstReconciler) reconcileNormal(ctx context.Context, envSubst *vcsi
 	}
 
 	if r.SupervisorMode {
-		envSubst.Status.Variables["VSPHERE_STORAGE_POLICY"] = "vcsim-default" // TODO: check if we can use the same value for legacy
-		// TODO: add values for VSphereMachineTemplate.Spec
+		// Variables used only in supervisor mode
+		envSubst.Status.Variables["VSPHERE_STORAGE_POLICY"] = "vcsim-default"
+		envSubst.Status.Variables["VSPHERE_MACHINE_CLASS_NAME"] = "best-effort-2xlarge"
+		envSubst.Status.Variables["VSPHERE_POWER_OFF_MODE"] = "trySoft"
+		envSubst.Status.Variables["VSPHERE_IMAGE_NAME"] = "test-image-ovf"
+		envSubst.Status.Variables["VSPHERE_STORAGE_CLASS"] = "vcsim-default"
+		return ctrl.Result{}, nil
 	}
+
+	// Variables used only in legacy mode
+
+	// cluster template variables about the vcsim instance.
+	envSubst.Status.Variables["VSPHERE_SERVER"] = fmt.Sprintf("https://%s", vCenter.Status.Host)
+	envSubst.Status.Variables["VSPHERE_TLS_THUMBPRINT"] = vCenter.Status.Thumbprint
+	envSubst.Status.Variables["VSPHERE_DATACENTER"] = vcsimDatacenterName(pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0))
+	envSubst.Status.Variables["VSPHERE_DATASTORE"] = vcsimDatastoreName(pointer.IntDeref(envSubst.Spec.Cluster.Datastore, 0))
+	envSubst.Status.Variables["VSPHERE_FOLDER"] = fmt.Sprintf("/DC%d/vm", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0))
+	envSubst.Status.Variables["VSPHERE_NETWORK"] = fmt.Sprintf("/DC%d/network/VM Network", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0))
+	envSubst.Status.Variables["VSPHERE_RESOURCE_POOL"] = fmt.Sprintf("/DC%d/host/DC%[1]d_C%d/Resources", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0), pointer.IntDeref(envSubst.Spec.Cluster.Cluster, 0))
+	envSubst.Status.Variables["VSPHERE_STORAGE_POLICY"] = vcsimDefaultStoragePolicyName
+	envSubst.Status.Variables["VSPHERE_TEMPLATE"] = fmt.Sprintf("/DC%d/vm/%s", pointer.IntDeref(envSubst.Spec.Cluster.Datacenter, 0), vcsimDefaultVMTemplateName)
 
 	return ctrl.Result{}, nil
 }
 
-func (r *EnvSubstReconciler) reconcileDelete(_ context.Context, _ *vcsimv1.EnvSubst, _ *vcsimv1.VCenter, _ *vcsimv1.FakeAPIServerEndpoint) (ctrl.Result, error) {
+func (r *EnvSubstReconciler) reconcileDelete(_ context.Context, _ *vcsimv1.EnvSubst, _ *vcsimv1.VCenter, _ *vcsimv1.ControlPlaneEndpoint) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }
 

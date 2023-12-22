@@ -28,8 +28,7 @@ const (
 
 // VCCenterSpec defines the desired state of the VCenter.
 type VCCenterSpec struct {
-	Model      *VCSimModelSpec `json:"model,omitempty"`
-	Generators GeneratorsSpec  `json:"generators,omitempty"`
+	Model *VCSimModelSpec `json:"model,omitempty"`
 }
 
 // VCSimModelSpec defines the model to be used by the VCenter.
@@ -62,6 +61,7 @@ type VCSimModelSpec struct {
 	// For example: /DC0/host/DC0_C0/Resources/DC0_C0_RP1
 	// Name prefix: RP, vcsim flag: -pool
 	// Default: 0
+	// TODO: model pool selection for each cluster; for now ResourcePool named "Resources" will be always used
 	Pool *int `json:"pool,omitempty"`
 
 	// Datastore specifies the number of Datastore entities to create
@@ -71,57 +71,7 @@ type VCSimModelSpec struct {
 	// Default: 1
 	Datastore *int `json:"datastore,omitempty"`
 
-	// TODO: model template creation for each datacenter; if not specified, default ones will be created for each k8sVersion used by clusters
-}
-
-// GeneratorsSpec defines the spec for generators.
-type GeneratorsSpec struct {
-	// EnvSubst defines the spec for the envsubst generators.
-	EnvSubst *EnvSubstGeneratorSpec `json:"envsubst,omitempty"`
-}
-
-// EnvSubstGeneratorSpec defines the spec for the envsubst generators.
-type EnvSubstGeneratorSpec struct {
-	// Clusters defines the spec for the envsubst generator targeting specific Cluster API clusters.
-	Clusters []ClusterEnvSubstGeneratorSpec `json:"clusters,omitempty"`
-}
-
-// ClusterEnvSubstGeneratorSpec defines the spec for the envsubst generator targeting a specific Cluster API cluster.
-type ClusterEnvSubstGeneratorSpec struct {
-	// The name of the Cluster API cluster.
-	Name string `json:"name"`
-
-	// The Kubernetes version of the Cluster API cluster.
-	// NOTE: This variable isn't related to the vcsim server, but we are handling it here
-	// in order to have a single point of control for all the variables related to a Cluster API template.
-	// Default: v1.28.0
-	KubernetesVersion *string `json:"kubernetesVersion,omitempty"`
-
-	// The number of the control plane machines in the Cluster API cluster.
-	// NOTE: This variable isn't related to the vcsim server, but we are handling it here
-	// in order to have a single point of control for all the variables related to a Cluster API template.
-	// Default: 1
-	ControlPlaneMachines *int `json:"controlPlaneMachines,omitempty"`
-
-	// The number of the worker machines in the Cluster API cluster.
-	// NOTE: This variable isn't related to the vcsim server, but we are handling it here
-	// in order to have a single point of control for all the variables related to a Cluster API template.
-	// Default: 1
-	WorkerMachines *int `json:"workerMachines,omitempty"`
-
-	// Datacenter specifies the Datacenter for the Cluster API cluster.
-	// Default: 0 (DC0)
-	Datacenter *int `json:"datacenter,omitempty"`
-
-	// Cluster specifies the Cluster for the Cluster API cluster.
-	// Default: 0 (C0)
-	Cluster *int `json:"cluster,omitempty"`
-
-	// Datastore specifies the Datastore for the Cluster API cluster.
-	// Default: 0 (LocalDS_0)
-	Datastore *int `json:"datastore,omitempty"`
-
-	// TODO: model pool selection; if not specified, root ResourcePool named "Resources" will be used
+	// TODO: consider if to add options for creating more folders, networks, custom storage policies
 }
 
 // VCenterStatus defines the observed state of the VCenter.

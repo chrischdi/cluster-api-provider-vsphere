@@ -103,6 +103,23 @@ rules:
 - apiGroups:
   - vcsim.infrastructure.cluster.x-k8s.io
   resources:
+  - controlplaneendpoints
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - vcsim.infrastructure.cluster.x-k8s.io
+  resources:
+  - controlplaneendpoints/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - vcsim.infrastructure.cluster.x-k8s.io
+  resources:
   - envsubsts
   verbs:
   - get
@@ -113,23 +130,6 @@ rules:
   - vcsim.infrastructure.cluster.x-k8s.io
   resources:
   - envsubsts/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - vcsim.infrastructure.cluster.x-k8s.io
-  resources:
-  - fakeapiserverendpoints
-  verbs:
-  - get
-  - list
-  - patch
-  - watch
-- apiGroups:
-  - vcsim.infrastructure.cluster.x-k8s.io
-  resources:
-  - fakeapiserverendpoints/status
   verbs:
   - get
   - patch

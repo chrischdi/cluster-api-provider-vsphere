@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/server/capi/server"
 )
 
-type FakeAPIServerEndpointReconciler struct {
+type ControlPlaneEndpointReconciler struct {
 	Client client.Client
 
 	CloudManager cloud.Manager
@@ -45,15 +45,15 @@ type FakeAPIServerEndpointReconciler struct {
 	WatchFilterValue string
 }
 
-// +kubebuilder:rbac:groups=vcsim.infrastructure.cluster.x-k8s.io,resources=fakeapiserverendpoints,verbs=get;list;watch;patch
-// +kubebuilder:rbac:groups=vcsim.infrastructure.cluster.x-k8s.io,resources=fakeapiserverendpoints/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=vcsim.infrastructure.cluster.x-k8s.io,resources=controlplaneendpoints,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=vcsim.infrastructure.cluster.x-k8s.io,resources=controlplaneendpoints/status,verbs=get;update;patch
 
-func (r *FakeAPIServerEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
+func (r *ControlPlaneEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
 	log := ctrl.LoggerFrom(ctx)
 
-	// Fetch the FakeAPIServerEndpoint instance
-	fakeAPIServerEndpoint := &vcsimv1.FakeAPIServerEndpoint{}
-	if err := r.Client.Get(ctx, req.NamespacedName, fakeAPIServerEndpoint); err != nil {
+	// Fetch the ControlPlaneEndpoint instance
+	controlPlaneEndpoint := &vcsimv1.ControlPlaneEndpoint{}
+	if err := r.Client.Get(ctx, req.NamespacedName, controlPlaneEndpoint); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
@@ -61,15 +61,15 @@ func (r *FakeAPIServerEndpointReconciler) Reconcile(ctx context.Context, req ctr
 	}
 
 	// Initialize the patch helper
-	patchHelper, err := patch.NewHelper(fakeAPIServerEndpoint, r.Client)
+	patchHelper, err := patch.NewHelper(controlPlaneEndpoint, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Always attempt to Patch the FakeAPIServerEndpoint object and status after each reconciliation.
+	// Always attempt to Patch the controlPlaneEndpoint object and status after each reconciliation.
 	defer func() {
-		if err := patchHelper.Patch(ctx, fakeAPIServerEndpoint); err != nil {
-			log.Error(err, "failed to patch FakeAPIServerEndpoint")
+		if err := patchHelper.Patch(ctx, controlPlaneEndpoint); err != nil {
+			log.Error(err, "failed to patch ControlPlaneEndpoint")
 			if reterr == nil {
 				reterr = err
 			}
@@ -77,26 +77,27 @@ func (r *FakeAPIServerEndpointReconciler) Reconcile(ctx context.Context, req ctr
 	}()
 
 	// Handle deleted machines
-	if !fakeAPIServerEndpoint.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, fakeAPIServerEndpoint)
+	if !controlPlaneEndpoint.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, controlPlaneEndpoint)
 	}
 
 	// Add finalizer first if not set to avoid the race condition between init and delete.
 	// Note: Finalizers in general can only be added when the deletionTimestamp is not set.
-	if !controllerutil.ContainsFinalizer(fakeAPIServerEndpoint, vcsimv1.FakeAPIServerEndpointFinalizer) {
-		controllerutil.AddFinalizer(fakeAPIServerEndpoint, vcsimv1.FakeAPIServerEndpointFinalizer)
+	if !controllerutil.ContainsFinalizer(controlPlaneEndpoint, vcsimv1.ControlPlaneEndpointFinalizer) {
+		controllerutil.AddFinalizer(controlPlaneEndpoint, vcsimv1.ControlPlaneEndpointFinalizer)
 		return ctrl.Result{}, nil
 	}
 
 	// Handle non-deleted machines
-	return r.reconcileNormal(ctx, fakeAPIServerEndpoint)
+	return r.reconcileNormal(ctx, controlPlaneEndpoint)
 }
 
-func (r *FakeAPIServerEndpointReconciler) reconcileNormal(ctx context.Context, fakeAPIServerEndpoint *vcsimv1.FakeAPIServerEndpoint) (ctrl.Result, error) {
+func (r *ControlPlaneEndpointReconciler) reconcileNormal(ctx context.Context, controlPlaneEndpoint *vcsimv1.ControlPlaneEndpoint) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	log.Info("Reconciling VCSim ControlPlaneEndpoint")
 
-	resourceGroup := klog.KObj(fakeAPIServerEndpoint).String() // TODO: this should match the name of the cluster, make this more explicit
+	// NOTE: The name of the ControlPlaneEndpoint should match the name of the Cluster.
+	resourceGroup := klog.KObj(controlPlaneEndpoint).String()
 
 	// Initialize a listener for the workload cluster.
 	// IMPORTANT: The fact that both the listener and the resourceGroup for a workload cluster have
@@ -110,17 +111,18 @@ func (r *FakeAPIServerEndpointReconciler) reconcileNormal(ctx context.Context, f
 	// NOTE: We are storing in this resource group all the Kubernetes resources that are expected to exist on the workload cluster (e.g Nodes).
 	r.CloudManager.AddResourceGroup(resourceGroup)
 
-	fakeAPIServerEndpoint.Status.Host = r.PodIp // NOTE: we are replacing the listener ip with the pod ip so it will be accessible from other pods as well
-	fakeAPIServerEndpoint.Status.Port = listener.Port()
+	controlPlaneEndpoint.Status.Host = r.PodIp // NOTE: we are replacing the listener ip with the pod ip so it will be accessible from other pods as well
+	controlPlaneEndpoint.Status.Port = listener.Port()
 
 	return ctrl.Result{}, nil
 }
 
-func (r *FakeAPIServerEndpointReconciler) reconcileDelete(ctx context.Context, fakeAPIServerEndpoint *vcsimv1.FakeAPIServerEndpoint) (ctrl.Result, error) {
+func (r *ControlPlaneEndpointReconciler) reconcileDelete(ctx context.Context, controlPlaneEndpoint *vcsimv1.ControlPlaneEndpoint) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	log.Info("Reconciling delete VCSim ControlPlaneEndpoint")
 
-	resourceGroup := klog.KObj(fakeAPIServerEndpoint).String() // TODO: this should match the name of the cluster, make this more explicit
+	// NOTE: The name of the ControlPlaneEndpoint should match the name of the Cluster.
+	resourceGroup := klog.KObj(controlPlaneEndpoint).String()
 
 	// Delete the listener for the workload cluster;
 	if err := r.APIServerMux.DeleteWorkloadClusterListener(resourceGroup); err != nil {
@@ -130,15 +132,15 @@ func (r *FakeAPIServerEndpointReconciler) reconcileDelete(ctx context.Context, f
 	// Delete the resource group hosting all the cloud resources belonging the workload cluster;
 	r.CloudManager.DeleteResourceGroup(resourceGroup)
 
-	controllerutil.RemoveFinalizer(fakeAPIServerEndpoint, vcsimv1.FakeAPIServerEndpointFinalizer)
+	controllerutil.RemoveFinalizer(controlPlaneEndpoint, vcsimv1.ControlPlaneEndpointFinalizer)
 
 	return ctrl.Result{}, nil
 }
 
 // SetupWithManager will add watches for this controller.
-func (r *FakeAPIServerEndpointReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
+func (r *ControlPlaneEndpointReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
 	err := ctrl.NewControllerManagedBy(mgr).
-		For(&vcsimv1.FakeAPIServerEndpoint{}).
+		For(&vcsimv1.ControlPlaneEndpoint{}).
 		WithOptions(options).
 		WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue)).
 		Complete(r)

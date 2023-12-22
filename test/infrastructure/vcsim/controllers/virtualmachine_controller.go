@@ -183,39 +183,9 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}()
 
-	vmR := &vmReconciler{
-		Client:            r.Client,
-		CloudManager:      r.CloudManager,
-		APIServerMux:      r.APIServerMux,
-		EnableKeepAlive:   r.EnableKeepAlive,
-		KeepAliveDuration: r.KeepAliveDuration,
-
-		// Type specific functions; those functions wraps the differences between legacy and supervisor types,
-		// thus allowing to use the same vmReconciler in both scenarios.
-		GetVCenterSession: func(ctx context.Context) (*session.Session, error) {
-			// Return a connection to the vCenter where the virtualMachine is hosted
-			return r.getVCenterSession(ctx)
-		},
-		IsVMWaitingforIP: func() bool {
-			// A virtualMachine is waiting for an IP when PoweredOn but without an Ip.
-			return virtualMachine.Status.PowerState == operatorv1.VirtualMachinePoweredOn && virtualMachine.Status.VmIp == ""
-		},
-		IsVMReady: func() bool {
-			// A virtualMachine is ready to provision fake objects hosted on it when PoweredOn and with a primary Ip assigned.
-			return virtualMachine.Status.PowerState == operatorv1.VirtualMachinePoweredOn && virtualMachine.Status.VmIp != ""
-		},
-		GetProviderID: func() string {
-			// Computes the ProviderID for the node hosted on the virtualMachine
-			return util.ConvertUUIDToProviderID(virtualMachine.Status.BiosUUID)
-		},
-		GetVMPath: func() string {
-			return path.Join("/DC0/vm", cluster.Name, virtualMachine.Name)
-		},
-	}
-
 	// Handle deleted machines
 	if !vSphereMachine.DeletionTimestamp.IsZero() {
-		return vmR.reconcileDelete(ctx, cluster, machine, conditionsTracker)
+		return r.reconcileDelete(ctx, cluster, machine, virtualMachine, conditionsTracker)
 	}
 
 	// Add finalizer first if not set to avoid the race condition between init and delete.
@@ -226,14 +196,80 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Handle non-deleted machines
-	return vmR.reconcileNormal(ctx, cluster, machine, conditionsTracker)
+	return r.reconcileNormal(ctx, cluster, machine, virtualMachine, conditionsTracker)
+}
+
+func (r *VirtualMachineReconciler) reconcileNormal(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, virtualMachine *operatorv1.VirtualMachine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+	ipReconciler := r.getVMIpReconciler(cluster, virtualMachine)
+	if ret, err := ipReconciler.ReconcileIP(ctx); !ret.IsZero() || err != nil {
+		return ctrl.Result{}, err
+	}
+
+	bootstrapReconciler := r.getVMBootstrapReconciler(virtualMachine)
+	if ret, err := bootstrapReconciler.reconcileBoostrap(ctx, cluster, machine, conditionsTracker); !ret.IsZero() || err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *VirtualMachineReconciler) reconcileDelete(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, virtualMachine *operatorv1.VirtualMachine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+	bootstrapReconciler := r.getVMBootstrapReconciler(virtualMachine)
+	if ret, err := bootstrapReconciler.reconcileShutdown(ctx, cluster, machine, conditionsTracker); !ret.IsZero() || err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *VirtualMachineReconciler) getVMIpReconciler(cluster *clusterv1.Cluster, virtualMachine *operatorv1.VirtualMachine) *vmIPReconciler {
+	return &vmIPReconciler{
+		Client:            r.Client,
+		EnableKeepAlive:   r.EnableKeepAlive,
+		KeepAliveDuration: r.KeepAliveDuration,
+
+		// Type specific functions; those functions wraps the differences between legacy and supervisor types,
+		// thus allowing to use the same vmIPReconciler in both scenarios.
+		GetVCenterSession: func(ctx context.Context) (*session.Session, error) {
+			// Return a connection to the vCenter where the virtualMachine is hosted
+			return r.getVCenterSession(ctx)
+		},
+		IsVMWaitingforIP: func() bool {
+			// A virtualMachine is waiting for an IP when PoweredOn but without an Ip.
+			return virtualMachine.Status.PowerState == operatorv1.VirtualMachinePoweredOn && virtualMachine.Status.VmIp == ""
+		},
+		GetVMPath: func() string {
+			// The vm operator always create VMs under a sub-folder with named like the cluster.
+			datacenter := 0
+			return vcsimVMPath(datacenter, path.Join(cluster.Name, virtualMachine.Name))
+		},
+	}
+}
+
+func (r *VirtualMachineReconciler) getVMBootstrapReconciler(virtualMachine *operatorv1.VirtualMachine) *vmBootstrapReconciler {
+	return &vmBootstrapReconciler{
+		Client:       r.Client,
+		CloudManager: r.CloudManager,
+		APIServerMux: r.APIServerMux,
+
+		// Type specific functions; those functions wraps the differences between legacy and supervisor types,
+		// thus allowing to use the same vmBootstrapReconciler in both scenarios.
+		IsVMReady: func() bool {
+			// A virtualMachine is ready to provision fake objects hosted on it when PoweredOn, with a primary Ip assigned and BiosUUID is set (bios id is required when provisioning the node to compute the Provider ID).
+			return virtualMachine.Status.PowerState == operatorv1.VirtualMachinePoweredOn && virtualMachine.Status.VmIp != "" && virtualMachine.Status.BiosUUID != ""
+		},
+		GetProviderID: func() string {
+			// Computes the ProviderID for the node hosted on the virtualMachine
+			return util.ConvertUUIDToProviderID(virtualMachine.Status.BiosUUID)
+		},
+	}
 }
 
 func (r VirtualMachineReconciler) getVCenterSession(ctx context.Context) (*session.Session, error) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      netConfigMapName,
-			Namespace: "vmware-system-vmop", // This is where tilt deploys the vm-operator // TODO: think how to make this configurable by Cluster (or Namespace where a vm-operator instance points to)
+			Namespace: vmopNamespace, // This is where tilt deploys the vm-operator
 		},
 	}
 	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(secret), secret); err != nil {
@@ -279,7 +315,6 @@ func (r *VirtualMachineReconciler) SetupWithManager(_ context.Context, mgr ctrl.
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1.VirtualMachine{}).
 		WithOptions(options).
-		// WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue)). // TODO: check if we need this
 		Complete(r)
 
 	if err != nil {

@@ -4,22 +4,24 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.13.0
-  name: fakeapiserverendpoints.vcsim.infrastructure.cluster.x-k8s.io
+  name: controlplaneendpoints.vcsim.infrastructure.cluster.x-k8s.io
 spec:
   group: vcsim.infrastructure.cluster.x-k8s.io
   names:
     categories:
     - cluster-api
-    kind: FakeAPIServerEndpoint
-    listKind: FakeAPIServerEndpointList
-    plural: fakeapiserverendpoints
-    singular: fakeapiserverendpoint
+    kind: ControlPlaneEndpoint
+    listKind: ControlPlaneEndpointList
+    plural: controlplaneendpoints
+    singular: controlplaneendpoint
   scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: FakeAPIServerEndpoint is the schema for a VCenter simulator server.
+        description: 'ControlPlaneEndpoint is the schema for a cluster virtual ip.
+          IMPORTANT: The name of the ControlPlaneEndpoint should match the name of
+          the cluster.'
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -34,12 +36,12 @@ spec:
           metadata:
             type: object
           spec:
-            description: FakeAPIServerEndpointSpec defines the desired state of the
-              FakeAPIServerEndpoint.
+            description: ControlPlaneEndpointSpec defines the desired state of the
+              ControlPlaneEndpoint.
             type: object
           status:
-            description: FakeAPIServerEndpointStatus defines the observed state of
-              the FakeAPIServerEndpoint.
+            description: ControlPlaneEndpointStatus defines the observed state of
+              the ControlPlaneEndpoint.
             properties:
               host:
                 description: The control plane host.

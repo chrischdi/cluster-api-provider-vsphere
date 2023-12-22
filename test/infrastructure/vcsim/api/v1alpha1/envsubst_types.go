@@ -60,8 +60,6 @@ type ClusterEnvSubstSpec struct {
 	// Datastore specifies the Datastore for the Cluster API cluster.
 	// Default: 0 (LocalDS_0)
 	Datastore *int `json:"datastore,omitempty"`
-
-	// TODO: model pool selection; if not specified, root ResourcePool named "Resources" will be used
 }
 
 // EnvSubstStatus defines the observed state of the EnvSubst.

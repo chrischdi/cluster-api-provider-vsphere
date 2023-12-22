@@ -314,14 +314,14 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager, supervisorMode bool
 		os.Exit(1)
 	}
 
-	if err := (&controllers.FakeAPIServerEndpointReconciler{
+	if err := (&controllers.ControlPlaneEndpointReconciler{
 		Client:           mgr.GetClient(),
 		CloudManager:     cloudMgr,
 		APIServerMux:     apiServerMux,
 		PodIp:            podIP,
 		WatchFilterValue: watchFilterValue,
 	}).SetupWithManager(ctx, mgr, concurrency(fakeAPIServerConcurrency)); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "FakeAPIServerEndpointReconciler")
+		setupLog.Error(err, "unable to create controller", "controller", "ControlPlaneEndpointReconciler")
 		os.Exit(1)
 	}
 

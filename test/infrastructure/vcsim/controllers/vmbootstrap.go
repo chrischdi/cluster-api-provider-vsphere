@@ -42,15 +42,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/vmware/govmomi/vim25/types"
 	infrav1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/v1beta1"
-	govmominet "sigs.k8s.io/cluster-api-provider-vsphere/pkg/services/govmomi/net"
-	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/session"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/util"
 	"sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/server/capi/cloud"
 	cclient "sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/server/capi/cloud/runtime/client"
 	"sigs.k8s.io/cluster-api-provider-vsphere/test/infrastructure/vcsim/server/capi/server"
 )
+
+// TODO: investigate if we can share this code with the CAPI in memory provider
 
 const (
 	// VMFinalizer allows this reconciler to cleanup resources before removing the
@@ -138,30 +137,20 @@ const (
 	EtcdMemberRemoved = "etcd.inmemory.infrastructure.cluster.x-k8s.io/member-removed"
 )
 
-type vmReconciler struct {
-	Client            client.Client
-	CloudManager      cloud.Manager
-	APIServerMux      *server.WorkloadClustersMux
-	EnableKeepAlive   bool
-	KeepAliveDuration time.Duration
+type vmBootstrapReconciler struct {
+	Client       client.Client
+	CloudManager cloud.Manager
+	APIServerMux *server.WorkloadClustersMux
 
-	GetVCenterSession func(ctx context.Context) (*session.Session, error)
-	IsVMWaitingforIP  func() bool
-	IsVMReady         func() bool
-	GetProviderID     func() string
-	GetVMPath         func() string
+	IsVMReady     func() bool
+	GetProviderID func() string
 }
 
-func (r *vmReconciler) reconcileNormal(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileBoostrap(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	if !conditions.Has(conditionsTracker, VMProvisionedCondition) {
 		conditions.MarkFalse(conditionsTracker, VMProvisionedCondition, WaitingForVMInfrastructureReason, clusterv1.ConditionSeverityInfo, "")
-	}
-
-	// If the VM is stuck provisioning waiting for IP (because there is no DHCP service in vcsim), the assign a fake IP.
-	if r.IsVMWaitingforIP() {
-		return r.ReconcileIPAddress(ctx)
 	}
 
 	// Make sure bootstrap data is available and populated.
@@ -170,18 +159,18 @@ func (r *vmReconciler) reconcileNormal(ctx context.Context, cluster *clusterv1.C
 		if !util.IsControlPlaneMachine(machine) && !conditions.IsTrue(cluster, clusterv1.ControlPlaneInitializedCondition) {
 			conditions.MarkFalse(conditionsTracker, VMProvisionedCondition, WaitingControlPlaneInitializedReason, clusterv1.ConditionSeverityInfo, "")
 			log.Info("Waiting for the control plane to be initialized")
-			return ctrl.Result{}, nil
+			return reconcile.Result{RequeueAfter: 5 * time.Second}, nil // keep requeueing since we don't have a watch on machines // TODO: check if we can avoid this
 		}
 
 		conditions.MarkFalse(conditionsTracker, VMProvisionedCondition, WaitingForBootstrapDataReason, clusterv1.ConditionSeverityInfo, "")
 		log.Info("Waiting for the Bootstrap provider controller to set bootstrap data")
-		return ctrl.Result{}, nil
+		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil // keep requeueing since we don't have a watch on machines // TODO: check if we can avoid this
 	}
 
 	// Check if the infrastructure is ready and the Bios UUID to be set (required for computing the Provide ID), otherwise return and wait for the vsphereVM object to be updated
 	if !r.IsVMReady() {
-		log.Info("Waiting for vsphereMachine Controller to report infrastructure ready and to set provider ID")
-		return ctrl.Result{}, nil
+		log.Info("Waiting for machine infrastructure to become ready")
+		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil // TODO: check if we can avoid this
 	}
 	if !conditions.IsTrue(conditionsTracker, VMProvisionedCondition) {
 		conditions.MarkTrue(conditionsTracker, VMProvisionedCondition)
@@ -189,14 +178,14 @@ func (r *vmReconciler) reconcileNormal(ctx context.Context, cluster *clusterv1.C
 
 	// Call the inner reconciliation methods.
 	phases := []func(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error){
-		r.reconcileNormalNode,
-		r.reconcileNormalETCD,
-		r.reconcileNormalAPIServer,
-		r.reconcileNormalScheduler,
-		r.reconcileNormalControllerManager,
-		r.reconcileNormalKubeadmObjects,
-		r.reconcileNormalKubeProxy,
-		r.reconcileNormalCoredns,
+		r.reconcileBoostrapNode,
+		r.reconcileBoostrapETCD,
+		r.reconcileBoostrapAPIServer,
+		r.reconcileBoostrapScheduler,
+		r.reconcileBoostrapControllerManager,
+		r.reconcileBoostrapKubeadmObjects,
+		r.reconcileBoostrapKubeProxy,
+		r.reconcileBoostrapCoredns,
 	}
 
 	res := ctrl.Result{}
@@ -209,104 +198,12 @@ func (r *vmReconciler) reconcileNormal(ctx context.Context, cluster *clusterv1.C
 		if len(errs) > 0 {
 			continue
 		}
-		// TODO: consider if we have to use max(RequeueAfter) instead of min(RequeueAfter) to reduce the pressure on
-		//  the reconcile queue for vSphereVMs given that we are requeuing just to wait for some period to expire;
-		//  the downside of it is that VSphereVMs "in memory" status will change by "big steps" vs incrementally.
 		res = capiutil.LowestNonZeroResult(res, phaseResult)
 	}
 	return res, kerrors.NewAggregate(errs)
 }
 
-func (r *vmReconciler) ReconcileIPAddress(ctx context.Context) (ctrl.Result, error) {
-	log := ctrl.LoggerFrom(ctx)
-
-	authSession, err := r.GetVCenterSession(ctx)
-	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed to get vcenter session")
-	}
-
-	vm, err := authSession.Finder.VirtualMachine(ctx, r.GetVMPath())
-	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed to find vm")
-	}
-
-	// Check if the VM already has network status (but it is not yet surfaced in conditions)
-	netStatus, err := govmominet.GetNetworkStatus(ctx, authSession.Client.Client, vm.Reference())
-	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed to get vm network status")
-	}
-	ipAddrs := []string{}
-	for _, s := range netStatus {
-		ipAddrs = append(ipAddrs, s.IPAddrs...)
-	}
-	if len(ipAddrs) > 0 {
-		log.Info("VM already has ips, waiting for CAPV's VSphereVM controller to update conditions", "ipAddrs", ipAddrs)
-		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil // Wait for CAPV's VSphereVM controller to detect the ip address and update conditions
-	}
-
-	task, err := vm.PowerOff(ctx)
-	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed to PowerOff vm")
-	}
-	if err = task.Wait(ctx); err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed to PowerOff vm task to complete")
-	}
-
-	// Add a fake ip address.
-	spec := types.CustomizationSpec{
-		NicSettingMap: []types.CustomizationAdapterMapping{
-			{
-				Adapter: types.CustomizationIPSettings{
-					Ip: &types.CustomizationFixedIp{
-						IpAddress: "192.168.1.100",
-					},
-					SubnetMask:    "255.255.255.0",
-					Gateway:       []string{"192.168.1.1"},
-					DnsServerList: []string{"192.168.1.1"},
-					DnsDomain:     "ad.domain",
-				},
-			},
-		},
-		Identity: &types.CustomizationLinuxPrep{
-			HostName: &types.CustomizationFixedName{
-				Name: "hostname",
-			},
-			Domain:     "ad.domain",
-			TimeZone:   "Etc/UTC",
-			HwClockUTC: types.NewBool(true),
-		},
-		GlobalIPSettings: types.CustomizationGlobalIPSettings{
-			DnsSuffixList: []string{"ad.domain"},
-			DnsServerList: []string{"192.168.1.1"},
-		},
-	}
-
-	task, err = vm.Customize(ctx, spec)
-	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed to Customize vm")
-	}
-	if err = task.Wait(ctx); err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed to wait for Customize vm task to complete")
-	}
-
-	task, err = vm.PowerOn(ctx)
-	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed to PowerOn vm")
-	}
-	if err = task.Wait(ctx); err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed to PowerOn vm task to complete")
-	}
-
-	ip, err := vm.WaitForIP(ctx)
-	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed to WaitForIP")
-	}
-	log.Info("VM gets IP", "ip", ip)
-
-	return reconcile.Result{RequeueAfter: 5 * time.Second}, nil // Wait for CAPV's VSphereVM controller to detect the ip address
-}
-
-func (r *vmReconciler) reconcileNormalNode(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileBoostrapNode(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	provisioningDuration := nodeStartupDuration
 	provisioningDuration += time.Duration(rand.Float64() * nodeStartupJitter * float64(provisioningDuration)) //nolint:gosec // Intentionally using a weak random number generator here.
 
@@ -363,7 +260,7 @@ func (r *vmReconciler) reconcileNormalNode(ctx context.Context, cluster *cluster
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileNormalETCD(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileBoostrapETCD(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -499,7 +396,7 @@ func (r *vmReconciler) reconcileNormalETCD(ctx context.Context, cluster *cluster
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileNormalAPIServer(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileBoostrapAPIServer(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -600,7 +497,7 @@ func (r *vmReconciler) reconcileNormalAPIServer(ctx context.Context, cluster *cl
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileNormalScheduler(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileBoostrapScheduler(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -648,7 +545,7 @@ func (r *vmReconciler) reconcileNormalScheduler(ctx context.Context, cluster *cl
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileNormalControllerManager(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileBoostrapControllerManager(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -696,7 +593,7 @@ func (r *vmReconciler) reconcileNormalControllerManager(ctx context.Context, clu
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileNormalKubeadmObjects(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileBoostrapKubeadmObjects(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -764,7 +661,7 @@ func (r *vmReconciler) reconcileNormalKubeadmObjects(ctx context.Context, cluste
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileNormalKubeProxy(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileBoostrapKubeProxy(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -811,7 +708,7 @@ func (r *vmReconciler) reconcileNormalKubeProxy(ctx context.Context, cluster *cl
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileNormalCoredns(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileBoostrapCoredns(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, _ *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -875,15 +772,14 @@ func (r *vmReconciler) reconcileNormalCoredns(ctx context.Context, cluster *clus
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileDelete(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileShutdown(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	// Call the inner reconciliation methods.
 	phases := []func(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error){
-		// TODO: revisit order when we implement behaviour for the deletion workflow
-		r.reconcileDeleteNode,
-		r.reconcileDeleteETCD,
-		r.reconcileDeleteAPIServer,
-		r.reconcileDeleteScheduler,
-		r.reconcileDeleteControllerManager,
+		r.reconcileShutdownNode,
+		r.reconcileShutdownETCD,
+		r.reconcileShutdownAPIServer,
+		r.reconcileShutdownScheduler,
+		r.reconcileShutdownControllerManager,
 		// Note: We are not deleting kubeadm objects because they exist in K8s, they are not related to a specific machine.
 	}
 
@@ -905,7 +801,7 @@ func (r *vmReconciler) reconcileDelete(ctx context.Context, cluster *clusterv1.C
 	return res, kerrors.NewAggregate(errs)
 }
 
-func (r *vmReconciler) reconcileDeleteNode(ctx context.Context, cluster *clusterv1.Cluster, _ *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileShutdownNode(ctx context.Context, cluster *clusterv1.Cluster, _ *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	// Compute the resource group unique name.
 	// NOTE: We are using reconcilerGroup also as a name for the listener for sake of simplicity.
 	resourceGroup := klog.KObj(cluster).String()
@@ -926,7 +822,7 @@ func (r *vmReconciler) reconcileDeleteNode(ctx context.Context, cluster *cluster
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileDeleteETCD(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileShutdownETCD(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -959,7 +855,7 @@ func (r *vmReconciler) reconcileDeleteETCD(ctx context.Context, cluster *cluster
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileDeleteAPIServer(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileShutdownAPIServer(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -987,7 +883,7 @@ func (r *vmReconciler) reconcileDeleteAPIServer(ctx context.Context, cluster *cl
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileDeleteScheduler(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileShutdownScheduler(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -1011,7 +907,7 @@ func (r *vmReconciler) reconcileDeleteScheduler(ctx context.Context, cluster *cl
 	return ctrl.Result{}, nil
 }
 
-func (r *vmReconciler) reconcileDeleteControllerManager(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+func (r *vmBootstrapReconciler) reconcileShutdownControllerManager(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -1041,7 +937,7 @@ type etcdInfo struct {
 	members   sets.Set[string]
 }
 
-func (r *vmReconciler) getEtcdInfo(ctx context.Context, cloudClient cclient.Client) (etcdInfo, error) {
+func (r *vmBootstrapReconciler) getEtcdInfo(ctx context.Context, cloudClient cclient.Client) (etcdInfo, error) {
 	etcdPods := &corev1.PodList{}
 	if err := cloudClient.List(ctx, etcdPods,
 		client.InNamespace(metav1.NamespaceSystem),
