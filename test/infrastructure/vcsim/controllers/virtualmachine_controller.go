@@ -219,6 +219,7 @@ func (r *VirtualMachineReconciler) reconcileDelete(ctx context.Context, cluster 
 		return ctrl.Result{}, err
 	}
 
+	controllerutil.RemoveFinalizer(virtualMachine, VMFinalizer)
 	return ctrl.Result{}, nil
 }
 

@@ -223,6 +223,7 @@ func (r *VSphereVMReconciler) reconcileDelete(ctx context.Context, cluster *clus
 		return ctrl.Result{}, err
 	}
 
+	controllerutil.RemoveFinalizer(vSphereVM, VMFinalizer)
 	return ctrl.Result{}, nil
 }
 
