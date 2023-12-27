@@ -274,7 +274,11 @@ func (h *apiServerHandler) apiV1Create(req *restful.Request, resp *restful.Respo
 	// TODO: consider check vs enforce for namespace on the object - namespace on the request path
 	obj.SetNamespace(req.PathParameter("namespace"))
 	if err := cloudClient.Create(ctx, obj); err != nil {
-		_ = resp.WriteErrorString(http.StatusInternalServerError, err.Error())
+		if status, ok := err.(apierrors.APIStatus); ok || errors.As(err, &status) {
+			_ = resp.WriteHeaderAndEntity(int(status.Status().Code), status)
+			return
+		}
+		_ = resp.WriteHeaderAndEntity(http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := resp.WriteEntity(obj); err != nil {
