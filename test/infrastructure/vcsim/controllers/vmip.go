@@ -27,7 +27,7 @@ type vmIPReconciler struct {
 func (r *vmIPReconciler) ReconcileIP(ctx context.Context) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
-	// If the VM is still provisioning, or it already has an IP, return.
+	// No op if f the VM is still provisioning, or it already has an IP, return.
 	if !r.IsVMWaitingforIP() {
 		return reconcile.Result{}, nil
 	}
@@ -54,9 +54,11 @@ func (r *vmIPReconciler) ReconcileIP(ctx context.Context) (ctrl.Result, error) {
 		ipAddrs = append(ipAddrs, s.IPAddrs...)
 	}
 	if len(ipAddrs) > 0 {
-		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil // Wait for the ip address to surface in K8s resources
+		// No op, the VM already has an IP, we should just wait for it to surface in K8s VirtualMachine/VSphereVM
+		return reconcile.Result{}, nil
 	}
 
+	log.Info("Powering Off the VM before applying an IP")
 	task, err := vm.PowerOff(ctx)
 	if err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to PowerOff vm")
@@ -94,6 +96,7 @@ func (r *vmIPReconciler) ReconcileIP(ctx context.Context) (ctrl.Result, error) {
 		},
 	}
 
+	log.Info("Customizing the VM for applying an IP")
 	task, err = vm.Customize(ctx, spec)
 	if err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to Customize vm")
@@ -102,6 +105,7 @@ func (r *vmIPReconciler) ReconcileIP(ctx context.Context) (ctrl.Result, error) {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to wait for Customize vm task to complete")
 	}
 
+	log.Info("Powering On the VM before applying an IP")
 	task, err = vm.PowerOn(ctx)
 	if err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to PowerOn vm")
@@ -114,7 +118,7 @@ func (r *vmIPReconciler) ReconcileIP(ctx context.Context) (ctrl.Result, error) {
 	if err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to WaitForIP")
 	}
-	log.Info("VM gets IP", "ip", ip)
+	log.Info("IP assigned to the VM", "ip", ip)
 
-	return reconcile.Result{RequeueAfter: 5 * time.Second}, nil // Wait for the ip address to surface in K8s resources
+	return reconcile.Result{}, nil
 }

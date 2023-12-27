@@ -1,5 +1,5 @@
 {
-  "name": "vspheresim",
+  "name": "vcsim-server",
   "config": {
     "version": "v1.9.99",
     "image": "gcr.io/k8s-staging-cluster-api/capvsim-manager",

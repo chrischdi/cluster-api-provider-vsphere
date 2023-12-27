@@ -170,7 +170,7 @@ func (r *vmBootstrapReconciler) reconcileBoostrap(ctx context.Context, cluster *
 	// Check if the infrastructure is ready and the Bios UUID to be set (required for computing the Provide ID), otherwise return and wait for the vsphereVM object to be updated
 	if !r.IsVMReady() {
 		log.Info("Waiting for machine infrastructure to become ready")
-		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil // TODO: check if we can avoid this
+		return reconcile.Result{}, nil // TODO: check if we can avoid this
 	}
 	if !conditions.IsTrue(conditionsTracker, VMProvisionedCondition) {
 		conditions.MarkTrue(conditionsTracker, VMProvisionedCondition)
@@ -204,6 +204,9 @@ func (r *vmBootstrapReconciler) reconcileBoostrap(ctx context.Context, cluster *
 }
 
 func (r *vmBootstrapReconciler) reconcileBoostrapNode(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+	log := ctrl.LoggerFrom(ctx)
+	nodeName := conditionsTracker.GetName()
+
 	provisioningDuration := nodeStartupDuration
 	provisioningDuration += time.Duration(rand.Float64() * nodeStartupJitter * float64(provisioningDuration)) //nolint:gosec // Intentionally using a weak random number generator here.
 
@@ -211,7 +214,9 @@ func (r *vmBootstrapReconciler) reconcileBoostrapNode(ctx context.Context, clust
 	now := time.Now()
 	if now.Before(start.Add(provisioningDuration)) {
 		conditions.MarkFalse(conditionsTracker, NodeProvisionedCondition, NodeWaitingForStartupTimeoutReason, clusterv1.ConditionSeverityInfo, "")
-		return ctrl.Result{RequeueAfter: start.Add(provisioningDuration).Sub(now)}, nil
+		remainingTime := start.Add(provisioningDuration).Sub(now)
+		log.Info("Waiting for Node to start", "Start", start, "Duration", provisioningDuration, "RemainingTime", remainingTime, "Node", nodeName)
+		return ctrl.Result{RequeueAfter: remainingTime}, nil
 	}
 
 	// Compute the resource group unique name.
@@ -223,7 +228,7 @@ func (r *vmBootstrapReconciler) reconcileBoostrapNode(ctx context.Context, clust
 	// TODO: consider if to handle an additional setting adding a delay in between create node and node ready/provider ID being set
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: conditionsTracker.GetName(),
+			Name: nodeName,
 		},
 		Spec: corev1.NodeSpec{
 			ProviderID: r.GetProviderID(),
@@ -257,10 +262,14 @@ func (r *vmBootstrapReconciler) reconcileBoostrapNode(ctx context.Context, clust
 	}
 
 	conditions.MarkTrue(conditionsTracker, NodeProvisionedCondition)
+	log.Info("Node created", "Pod", klog.KObj(node))
 	return ctrl.Result{}, nil
 }
 
 func (r *vmBootstrapReconciler) reconcileBoostrapETCD(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+	log := ctrl.LoggerFrom(ctx)
+	etcdMember := fmt.Sprintf("etcd-%s", conditionsTracker.GetName())
+
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -279,7 +288,9 @@ func (r *vmBootstrapReconciler) reconcileBoostrapETCD(ctx context.Context, clust
 	now := time.Now()
 	if now.Before(start.Add(provisioningDuration)) {
 		conditions.MarkFalse(conditionsTracker, EtcdProvisionedCondition, EtcdWaitingForStartupTimeoutReason, clusterv1.ConditionSeverityInfo, "")
-		return ctrl.Result{RequeueAfter: start.Add(provisioningDuration).Sub(now)}, nil
+		remainingTime := start.Add(provisioningDuration).Sub(now)
+		log.Info("Waiting for etcd Pod to start", "Start", start, "Duration", provisioningDuration, "RemainingTime", remainingTime, "Pod", klog.KRef(metav1.NamespaceSystem, etcdMember))
+		return ctrl.Result{RequeueAfter: remainingTime}, nil
 	}
 
 	// Compute the resource group unique name.
@@ -289,7 +300,6 @@ func (r *vmBootstrapReconciler) reconcileBoostrapETCD(ctx context.Context, clust
 
 	// Create the etcd pod
 	// TODO: consider if to handle an additional setting adding a delay in between create pod and pod ready
-	etcdMember := fmt.Sprintf("etcd-%s", conditionsTracker.GetName())
 	etcdPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: metav1.NamespaceSystem,
@@ -393,10 +403,14 @@ func (r *vmBootstrapReconciler) reconcileBoostrapETCD(ctx context.Context, clust
 	}
 
 	conditions.MarkTrue(conditionsTracker, EtcdProvisionedCondition)
+	log.Info("etcd Pod started", "Pod", klog.KObj(etcdPod))
 	return ctrl.Result{}, nil
 }
 
 func (r *vmBootstrapReconciler) reconcileBoostrapAPIServer(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
+	log := ctrl.LoggerFrom(ctx)
+	apiServer := fmt.Sprintf("kube-apiserver-%s", conditionsTracker.GetName())
+
 	// No-op if the machine is not a control plane machine.
 	if !util.IsControlPlaneMachine(machine) {
 		return ctrl.Result{}, nil
@@ -415,7 +429,9 @@ func (r *vmBootstrapReconciler) reconcileBoostrapAPIServer(ctx context.Context, 
 	now := time.Now()
 	if now.Before(start.Add(provisioningDuration)) {
 		conditions.MarkFalse(conditionsTracker, APIServerProvisionedCondition, APIServerWaitingForStartupTimeoutReason, clusterv1.ConditionSeverityInfo, "")
-		return ctrl.Result{RequeueAfter: start.Add(provisioningDuration).Sub(now)}, nil
+		remainingTime := start.Add(provisioningDuration).Sub(now)
+		log.Info("Waiting for API server Pod to start", "Start", start, "Duration", provisioningDuration, "RemainingTime", remainingTime, "Pod", klog.KRef(metav1.NamespaceSystem, apiServer))
+		return ctrl.Result{RequeueAfter: remainingTime}, nil
 	}
 
 	// Compute the resource group unique name.
@@ -425,7 +441,6 @@ func (r *vmBootstrapReconciler) reconcileBoostrapAPIServer(ctx context.Context, 
 
 	// Create the apiserver pod
 	// TODO: consider if to handle an additional setting adding a delay in between create pod and pod ready
-	apiServer := fmt.Sprintf("kube-apiserver-%s", conditionsTracker.GetName())
 
 	apiServerPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -494,6 +509,7 @@ func (r *vmBootstrapReconciler) reconcileBoostrapAPIServer(ctx context.Context, 
 	}
 
 	conditions.MarkTrue(conditionsTracker, APIServerProvisionedCondition)
+	log.Info("API server Pod started", "Pod", klog.KObj(apiServerPod))
 	return ctrl.Result{}, nil
 }
 

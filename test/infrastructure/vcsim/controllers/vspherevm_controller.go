@@ -206,12 +206,12 @@ func (r *VSphereVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 func (r *VSphereVMReconciler) reconcileNormal(ctx context.Context, cluster *clusterv1.Cluster, vSphereCluster *infrav1.VSphereCluster, machine *clusterv1.Machine, vSphereVM *infrav1.VSphereVM, conditionsTracker *infrav1.VSphereVM) (ctrl.Result, error) {
 	ipReconciler := r.getVMIpReconciler(vSphereCluster, vSphereVM)
 	if ret, err := ipReconciler.ReconcileIP(ctx); !ret.IsZero() || err != nil {
-		return ctrl.Result{}, err
+		return ret, err
 	}
 
 	bootstrapReconciler := r.getVMBootstrapReconciler(vSphereVM)
 	if ret, err := bootstrapReconciler.reconcileBoostrap(ctx, cluster, machine, conditionsTracker); !ret.IsZero() || err != nil {
-		return ctrl.Result{}, err
+		return ret, err
 	}
 
 	return ctrl.Result{}, nil
