@@ -34,6 +34,7 @@ const vmopNamespace = "vmware-system-vmop"
 type ContentLibraryItemFilesConfig struct {
 	Name    string
 	Content []byte
+	Url     string
 }
 
 type ContentLibraryItemConfig struct {
@@ -219,8 +220,8 @@ func reconcileVMOperatorDeployment(ctx context.Context, c client.Client, config 
 			Namespace: config.Namespace,
 		},
 		Data: map[string][]byte{
-			"password": []byte(config.VCenterCluster.Username),
-			"username": []byte(config.VCenterCluster.Password),
+			"username": []byte(config.VCenterCluster.Username),
+			"password": []byte(config.VCenterCluster.Password),
 		},
 		Type: corev1.SecretTypeOpaque,
 	}
