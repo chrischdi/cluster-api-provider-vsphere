@@ -80,7 +80,7 @@ func init() {
 	if !ok {
 		klog.Fatalf("Failed to get information for current file from runtime")
 	}
-	root := path.Join(path.Dir(filename), "..", "..")
+	root := path.Join(path.Dir(filename), "..", "..", "..")
 
 	crdPaths := []string{
 		filepath.Join(root, "config", "default", "crd", "bases"),
