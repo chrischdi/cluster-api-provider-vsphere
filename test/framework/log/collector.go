@@ -72,9 +72,9 @@ func (collector MachineLogCollector) CollectMachineLog(_ context.Context, _ clie
 		captureLogs("containerd.log",
 			"sudo journalctl", "--no-pager", "--output=short-precise", "-u", "containerd.service"),
 		captureLogs("cloud-init.log",
-			"cat", "/var/log/cloud-init.log"),
+			"sudo", "cat", "/var/log/cloud-init.log"),
 		captureLogs("cloud-init-output.log",
-			"cat", "/var/log/cloud-init-output.log"),
+			"sudo", "cat", "/var/log/cloud-init-output.log"),
 	})
 }
 
@@ -110,7 +110,9 @@ func executeRemoteCommand(f io.StringWriter, hostIPAddr, command string, args ..
 
 	// Run the command and write the captured stdout to the file
 	var stdoutBuf bytes.Buffer
+	var stderrBuf bytes.Buffer
 	session.Stdout = &stdoutBuf
+	session.Stderr = &stderrBuf
 	if len(args) > 0 {
 		command += " " + strings.Join(args, " ")
 	}
@@ -118,7 +120,10 @@ func executeRemoteCommand(f io.StringWriter, hostIPAddr, command string, args ..
 		return errors.Wrapf(err, "running command \"%s\"", command)
 	}
 	if _, err = f.WriteString(stdoutBuf.String()); err != nil {
-		return errors.Wrap(err, "writing output to file")
+		return errors.Wrap(err, "writing stdout output to file")
+	}
+	if _, err = f.WriteString(stderrBuf.String()); err != nil {
+		return errors.Wrap(err, "writing stderr output to file")
 	}
 
 	return nil
