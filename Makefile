@@ -171,7 +171,7 @@ KIND_BIN := kind
 KIND := $(abspath $(TOOLS_BIN_DIR)/$(KIND_BIN)-$(KIND_VER))
 KIND_PKG := sigs.k8s.io/kind
 
-CAPI_HACK_TOOLS_VER := 4abf44cd85c4590602e4c10543d53cd4ec914845 # Note: this is the commit ID of the dependend CAPI release tag, currently v1.5.0
+CAPI_HACK_TOOLS_VER := 380e76a83898534bb28422a6dc99878a8bd7c051 # Note: this is the commit ID of the dependend CAPI release tag, currently v1.5.0
 
 CONVERSION_VERIFIER_VER := $(CAPI_HACK_TOOLS_VER)
 CONVERSION_VERIFIER_BIN := conversion-verifier
