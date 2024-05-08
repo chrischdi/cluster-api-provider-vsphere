@@ -48,6 +48,7 @@ type IntegrationTestContext struct {
 	Namespace         string
 	VSphereCluster    *vmwarev1.VSphereCluster
 	Cluster           *clusterv1.Cluster
+	KubeconfigSecret  *corev1.Secret
 	VSphereClusterKey client.ObjectKey
 	envTest           *envtest.Environment
 }
@@ -102,7 +103,7 @@ func NewIntegrationTestContextWithClusters(goctx context.Context, integrationTes
 	})
 
 	vsphereClusterName := capiutil.RandomString(6)
-	ctx.Cluster = createCluster(goctx, integrationTestClient, ctx.Namespace, vsphereClusterName)
+	ctx.Cluster = createCluster(ctx.Namespace, vsphereClusterName)
 
 	var config *rest.Config
 	By("Creating guest cluster control plane", func() {
@@ -143,10 +144,11 @@ func NewIntegrationTestContextWithClusters(goctx context.Context, integrationTes
 				Name:      fmt.Sprintf("%s-kubeconfig", ctx.Cluster.Name),
 				OwnerReferences: []metav1.OwnerReference{
 					{
-						APIVersion: ctx.Cluster.APIVersion,
-						Kind:       ctx.Cluster.Kind,
+						APIVersion: clusterv1.GroupVersion.String(),
+						Kind:       "Cluster",
 						Name:       ctx.Cluster.Name,
-						UID:        ctx.Cluster.UID,
+						// Using a random id in this case is okay because we don't rely on it to be the correct uid.
+						UID: "should-be-uid-of-cluster",
 					},
 				},
 			},
@@ -154,26 +156,32 @@ func NewIntegrationTestContextWithClusters(goctx context.Context, integrationTes
 				"value": buf,
 			},
 		}
-		Expect(integrationTestClient.Create(goctx, secret)).To(Succeed())
-		Eventually(func() error {
-			return integrationTestClient.Get(goctx, client.ObjectKeyFromObject(secret), secret)
-		}).Should(Succeed())
+		ctx.KubeconfigSecret = secret
 	})
 
 	By("Create a vsphere cluster and wait for it to exist", func() {
-		ctx.VSphereCluster = createVSphereCluster(ctx, integrationTestClient, ctx.Namespace, vsphereClusterName, ctx.Cluster.GetName())
+		ctx.VSphereCluster = createVSphereCluster(ctx.Namespace, vsphereClusterName, ctx.Cluster.GetName())
 		ctx.VSphereClusterKey = client.ObjectKeyFromObject(ctx.VSphereCluster)
 	})
 
 	return ctx
 }
 
-func createCluster(ctx context.Context, integrationTestClient client.Client, namespace, name string) *clusterv1.Cluster {
+// CreateAndWait creates and waits for an object to exist.
+func CreateAndWait(ctx context.Context, integrationTestClient client.Client, obj client.Object) {
+	GinkgoHelper()
+	Expect(integrationTestClient.Create(ctx, obj)).To(Succeed())
+	Eventually(func() error {
+		return integrationTestClient.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+	}).Should(Succeed())
+}
+
+func createCluster(namespace, name string) *clusterv1.Cluster {
 	By("Create the CAPI Cluster and wait for it to exist")
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace:    namespace,
-			GenerateName: name,
+			Namespace: namespace,
+			Name:      fmt.Sprintf("%s-%s", name, capiutil.RandomString(6)),
 		},
 		Spec: clusterv1.ClusterSpec{
 			ClusterNetwork: &clusterv1.ClusterNetwork{
@@ -190,14 +198,10 @@ func createCluster(ctx context.Context, integrationTestClient client.Client, nam
 			},
 		},
 	}
-	Expect(integrationTestClient.Create(ctx, cluster)).To(Succeed())
-	Eventually(func() error {
-		return integrationTestClient.Get(ctx, client.ObjectKeyFromObject(cluster), cluster)
-	}).Should(Succeed())
 	return cluster
 }
 
-func createVSphereCluster(ctx context.Context, integrationTestClient client.Client, namespace, name, capiClusterName string) *vmwarev1.VSphereCluster {
+func createVSphereCluster(namespace, name, capiClusterName string) *vmwarev1.VSphereCluster {
 	vsphereCluster := &vmwarev1.VSphereCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: namespace,
@@ -205,31 +209,6 @@ func createVSphereCluster(ctx context.Context, integrationTestClient client.Clie
 			Labels:    map[string]string{clusterv1.ClusterNameLabel: capiClusterName},
 		},
 	}
-	Expect(integrationTestClient.Create(ctx, vsphereCluster)).To(Succeed())
-	Eventually(func() error {
-		return integrationTestClient.Get(ctx, client.ObjectKeyFromObject(vsphereCluster), vsphereCluster)
-	}).Should(Succeed())
-
-	// TODO: remove if not needed
-	By("Creating a extensions ca", func() {
-		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      vsphereCluster.Name + "-extensions-ca",
-				Namespace: namespace,
-			},
-			Data: map[string][]byte{
-				"ca.crt":  []byte("test-ca"),
-				"tls.crt": []byte("test-tls.crt"),
-				"tls.key": []byte("test-tls.key"),
-			},
-			Type: corev1.SecretTypeTLS,
-		}
-		Expect(integrationTestClient.Create(ctx, secret)).To(Succeed())
-		secretKey := client.ObjectKey{Namespace: secret.Namespace, Name: secret.Name}
-		Eventually(func() error {
-			return integrationTestClient.Get(ctx, secretKey, secret)
-		}).Should(Succeed())
-	})
 	return vsphereCluster
 }
 
