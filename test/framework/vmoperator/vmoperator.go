@@ -477,7 +477,7 @@ func ReconcileDependencies(ctx context.Context, c client.Client, dependenciesCon
 			},
 			Spec: vmoprv1.VirtualMachineImageSpec{
 				ProviderRef: vmoprv1common.LocalObjectRef{
-					Kind: "ContentLibraryItem",
+					Kind: "NoContentLibraryItem",
 				},
 			},
 		}

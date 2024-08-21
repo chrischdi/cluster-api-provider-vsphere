@@ -908,7 +908,9 @@ docker-vm-operator-build-%:
 docker-build-vm-operator: checkout-vm-operator
 	@if [ -z "${VM_OPERATOR_VERSION}" ]; then echo "VM_OPERATOR_VERSION is not set"; exit 1; fi
 	cd $(VM_OPERATOR_TMP_DIR) && \
-	$(MAKE) IMAGE=$(VM_OPERATOR_CONTROLLER_IMG)-$(ARCH) IMAGE_TAG=$(VM_OPERATOR_VERSION) GOARCH=$(ARCH) docker-build
+	git apply ../vm-operator-image-clone-patch.diff && \
+	$(MAKE) IMAGE=$(VM_OPERATOR_CONTROLLER_IMG)-$(ARCH) IMAGE_TAG=$(VM_OPERATOR_VERSION) GOARCH=$(ARCH) docker-build && \
+	git restore pkg/vmprovider/providers/vsphere2/vmprovider_vm.go
 
 .PHONY: docker-push-all-vm-operator
 docker-push-all-vm-operator: $(addprefix docker-vm-operator-push-,$(VM_OPERATOR_ALL_ARCH))  ## Push the docker images to be included in the release for all architectures + related multiarch manifests
