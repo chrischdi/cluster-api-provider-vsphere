@@ -27,6 +27,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -294,7 +295,9 @@ func addVCSimTestVariables(managementClusterProxy framework.ClusterProxy, specNa
 	}
 
 	err = managementClusterProxy.GetClient().Create(ctx, envVar)
-	Expect(err).ToNot(HaveOccurred(), "Failed to create EnvVar")
+	if !apierrors.IsAlreadyExists(err) {
+		Expect(err).ToNot(HaveOccurred(), "Failed to create EnvVar")
+	}
 
 	Eventually(func() bool {
 		if err := managementClusterProxy.GetClient().Get(ctx, crclient.ObjectKeyFromObject(envVar), envVar); err != nil {
@@ -339,7 +342,9 @@ func setupNamespaceWithVMOperatorDependenciesVCSim(managementClusterProxy framew
 		},
 	}
 	err = c.Create(ctx, dependenciesConfig)
-	Expect(err).ToNot(HaveOccurred(), "Failed to create VMOperatorDependencies")
+	if !apierrors.IsAlreadyExists(err) {
+		Expect(err).ToNot(HaveOccurred(), "Failed to create VMOperatorDependencies")
+	}
 
 	Eventually(func() bool {
 		if err := c.Get(ctx, crclient.ObjectKeyFromObject(dependenciesConfig), dependenciesConfig); err != nil {
