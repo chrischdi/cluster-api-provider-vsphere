@@ -3,9 +3,9 @@
   value:
   - name: test-patch
     external:
-      generateExtension: generate-patches.k8s-upgrade-with-runtimesdk
-      validateExtension: validate-topology.k8s-upgrade-with-runtimesdk
-      discoverVariablesExtension: discover-variables.k8s-upgrade-with-runtimesdk
+      generateExtension: generate-patches.capv-test-extension
+      validateExtension: validate-topology.capv-test-extension
+      discoverVariablesExtension: discover-variables.capv-test-extension
       settings:
         testMode: supervisor
 - op: remove

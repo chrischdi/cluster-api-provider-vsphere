@@ -61,7 +61,7 @@ var _ = Describe("When testing the machinery for scale testing FP [vcsim] [super
 			ControlPlaneMachineCount:          ptr.To[int64](1),
 			MachineDeploymentCount:            ptr.To[int64](1),
 			WorkerMachineCount:                ptr.To[int64](3),
-			Flavor:                            ptr.To("topology"),
+			Flavor:                            ptr.To("topology-runtimesdk"),
 			SkipUpgrade:                       true,
 			SkipCleanup:                       skipCleanup,
 		}
@@ -722,7 +722,7 @@ func createClusterWorker(ctx context.Context, clusterProxy framework.ClusterProx
 				_, testSpecificIPAddressClaims, testSpecificVariables := allocateIPAddresses(clusterProxy, &setupOptions{})
 
 				// Get variables required when running on VCSim like VSphere Server address, user, etc.
-				addVCSimTestVariables(clusterProxy, fmt.Sprintf("scale-%s", clusterName), testSpecificIPAddressClaims, testSpecificVariables, false)
+				addVCSimTestVariables(clusterProxy, fmt.Sprintf("scale-%s", clusterName), testSpecificIPAddressClaims, testSpecificVariables)
 
 				clusterTemplateYAML = bytes.Replace(clusterTemplateYAML, []byte(scaleClusterControlPlaneEndpointIPPlaceholder), []byte(testSpecificVariables["CONTROL_PLANE_ENDPOINT_IP"]), -1)
 				clusterTemplateYAML = bytes.Replace(clusterTemplateYAML, []byte(scaleClusterControlPlaneEndpointPortPlaceholder), []byte(testSpecificVariables["CONTROL_PLANE_ENDPOINT_PORT"]), -1)

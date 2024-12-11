@@ -10,9 +10,4 @@ spec:
       name: capv-test-extension-webhook-service
       namespace: capv-test-extension # Note: this assumes the test extension get deployed in the default namespace defined in its own runtime-extensions-components.yaml
       port: 443
-  namespaceSelector:
-    matchExpressions:
-      - key: kubernetes.io/metadata.name
-        operator: In
-        values:
-          - default # Note: this assumes the test extension is used by Cluster in the default namespace only
+  namespaceSelector: {}
