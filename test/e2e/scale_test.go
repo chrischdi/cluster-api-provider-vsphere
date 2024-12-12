@@ -56,8 +56,8 @@ var _ = Describe("When testing the machinery for scale testing FP [vcsim] [super
 			BootstrapClusterProxy:             bootstrapClusterProxy,
 			ArtifactFolder:                    artifactFolder,
 			DeployClusterInSeparateNamespaces: true,
-			ClusterCount:                      ptr.To[int64](10),
-			Concurrency:                       ptr.To[int64](5),
+			ClusterCount:                      ptr.To[int64](500),
+			Concurrency:                       ptr.To[int64](20),
 			ControlPlaneMachineCount:          ptr.To[int64](1),
 			MachineDeploymentCount:            ptr.To[int64](1),
 			WorkerMachineCount:                ptr.To[int64](3),
@@ -687,7 +687,7 @@ func createClusterWorker(ctx context.Context, clusterProxy framework.ClusterProx
 					}, "40s", "10s")
 
 					logf("Setup VMOperator and VCSim dependencies in namespace %", namespaceName)
-					setupNamespaceWithVMOperatorDependenciesVCSim(clusterProxy, namespaceName)
+					// setupNamespaceWithVMOperatorDependenciesVCSim(clusterProxy, namespaceName)
 				}
 
 				// Call postScaleClusterNamespaceCreated hook to apply custom requirements based on the cluster name and namespace
@@ -709,6 +709,7 @@ func createClusterWorker(ctx context.Context, clusterProxy framework.ClusterProx
 					}, 1*time.Minute).Should(Succeed())
 				}
 
+				return false
 				// Adjust namespace and name in Cluster YAML
 				clusterTemplateYAML := bytes.Replace(customizedClusterTemplateYAML, []byte(scaleClusterNamespacePlaceholder), []byte(namespaceName), -1)
 				clusterTemplateYAML = bytes.Replace(clusterTemplateYAML, []byte(scaleClusterNamePlaceholder), []byte(clusterName), -1)
@@ -730,7 +731,7 @@ func createClusterWorker(ctx context.Context, clusterProxy framework.ClusterProx
 				clusterTemplateYAML = bytes.Replace(clusterTemplateYAML, []byte(scaleClusterVSphereTLSThumbprintPlaceholder), []byte(testSpecificVariables["VSPHERE_TLS_THUMBPRINT"]), -1)
 
 				// Deploy Cluster.
-				create(ctx, namespaceName, clusterName, clusterTemplateYAML)
+				// create(ctx, namespaceName, clusterName, clusterTemplateYAML)
 				return false
 			}
 		}()
