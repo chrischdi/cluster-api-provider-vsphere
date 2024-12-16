@@ -64,6 +64,7 @@ var _ = Describe("When testing the machinery for scale testing FP [vcsim] [super
 			Flavor:                            ptr.To("topology-runtimesdk"),
 			SkipUpgrade:                       true,
 			SkipCleanup:                       skipCleanup,
+			AdditionalClusterClasses:          4,
 		}
 	})
 })
@@ -173,6 +174,8 @@ type ScaleSpecInput struct {
 	// If set to true, the test will create the workload clusters and immediately continue without waiting
 	// for the clusters to be fully provisioned.
 	SkipWaitForCreation bool
+
+	AdditionalClusterClasses int
 }
 
 // ScaleSpec implements a scale test for clusters with MachineDeployments.
@@ -403,7 +406,7 @@ func ScaleSpec(ctx context.Context, inputGetter func() ScaleSpecInput) {
 			Concurrency:  concurrency,
 			FailFast:     input.FailFast,
 			WorkerFunc: func(ctx context.Context, inputChan chan string, resultChan chan workResult, wg *sync.WaitGroup) {
-				createClusterWorker(ctx, input.BootstrapClusterProxy, inputChan, resultChan, wg, namespace.Name, input.DeployClusterInSeparateNamespaces, baseClusterClassYAML, baseClusterTemplateYAML, creator, input.PostScaleClusterNamespaceCreated)
+				createClusterWorker(ctx, input.BootstrapClusterProxy, inputChan, resultChan, wg, namespace.Name, input.DeployClusterInSeparateNamespaces, baseClusterClassYAML, baseClusterTemplateYAML, creator, input.PostScaleClusterNamespaceCreated, input.AdditionalClusterClasses)
 			},
 		})
 		if err != nil {
@@ -642,7 +645,7 @@ func getClusterCreateFn(clusterProxy framework.ClusterProxy) clusterCreator {
 
 type PostScaleClusterNamespaceCreated func(clusterProxy framework.ClusterProxy, clusterNamespace string, clusterName string, clusterClassYAML []byte, clusterTemplateYAML []byte) ([]byte, []byte)
 
-func createClusterWorker(ctx context.Context, clusterProxy framework.ClusterProxy, inputChan <-chan string, resultChan chan<- workResult, wg *sync.WaitGroup, defaultNamespace string, deployClusterInSeparateNamespaces bool, baseClusterClassYAML, baseClusterTemplateYAML []byte, create clusterCreator, postScaleClusterNamespaceCreated PostScaleClusterNamespaceCreated) {
+func createClusterWorker(ctx context.Context, clusterProxy framework.ClusterProxy, inputChan <-chan string, resultChan chan<- workResult, wg *sync.WaitGroup, defaultNamespace string, deployClusterInSeparateNamespaces bool, baseClusterClassYAML, baseClusterTemplateYAML []byte, create clusterCreator, postScaleClusterNamespaceCreated PostScaleClusterNamespaceCreated, additionalClusterClasses int) {
 	defer wg.Done()
 
 	for {
@@ -707,6 +710,15 @@ func createClusterWorker(ctx context.Context, clusterProxy framework.ClusterProx
 					Eventually(func() error {
 						return clusterProxy.CreateOrUpdate(ctx, clusterClassYAML)
 					}, 1*time.Minute).Should(Succeed())
+					// Create additional unused instances of the ClusterClass
+					for i := 0; i < 4; i++ {
+						additionalName := fmt.Sprintf("quick-start-supervisor-%d", i+1)
+						logf("Apply additional ClusterClass %s/%s", namespaceName, additionalName)
+						additionalClassYAML := bytes.Replace(clusterClassYAML, []byte("quick-start-supervisor"), []byte(additionalName), -1)
+						Eventually(func() error {
+							return clusterProxy.CreateOrUpdate(ctx, additionalClassYAML)
+						}, 1*time.Minute).Should(Succeed())
+					}
 				}
 
 				// Adjust namespace and name in Cluster YAML
@@ -722,7 +734,7 @@ func createClusterWorker(ctx context.Context, clusterProxy framework.ClusterProx
 				_, testSpecificIPAddressClaims, testSpecificVariables := allocateIPAddresses(clusterProxy, &setupOptions{})
 
 				// Get variables required when running on VCSim like VSphere Server address, user, etc.
-				addVCSimTestVariables(clusterProxy, fmt.Sprintf("scale-%s", clusterName), testSpecificIPAddressClaims, testSpecificVariables, false)
+				addVCSimTestVariables(clusterProxy, fmt.Sprintf("scale-%s", clusterName), testSpecificIPAddressClaims, testSpecificVariables)
 
 				clusterTemplateYAML = bytes.Replace(clusterTemplateYAML, []byte(scaleClusterControlPlaneEndpointIPPlaceholder), []byte(testSpecificVariables["CONTROL_PLANE_ENDPOINT_IP"]), -1)
 				clusterTemplateYAML = bytes.Replace(clusterTemplateYAML, []byte(scaleClusterControlPlaneEndpointPortPlaceholder), []byte(testSpecificVariables["CONTROL_PLANE_ENDPOINT_PORT"]), -1)
