@@ -711,7 +711,7 @@ func createClusterWorker(ctx context.Context, clusterProxy framework.ClusterProx
 						return clusterProxy.CreateOrUpdate(ctx, clusterClassYAML)
 					}, 1*time.Minute).Should(Succeed())
 					// Create additional unused instances of the ClusterClass
-					for i := 0; i < 4; i++ {
+					for i := 0; i < additionalClusterClasses; i++ {
 						additionalName := fmt.Sprintf("quick-start-supervisor-%d", i+1)
 						logf("Apply additional ClusterClass %s/%s", namespaceName, additionalName)
 						additionalClassYAML := bytes.Replace(clusterClassYAML, []byte("quick-start-supervisor"), []byte(additionalName), -1)
@@ -734,7 +734,7 @@ func createClusterWorker(ctx context.Context, clusterProxy framework.ClusterProx
 				_, testSpecificIPAddressClaims, testSpecificVariables := allocateIPAddresses(clusterProxy, &setupOptions{})
 
 				// Get variables required when running on VCSim like VSphere Server address, user, etc.
-				addVCSimTestVariables(clusterProxy, fmt.Sprintf("scale-%s", clusterName), testSpecificIPAddressClaims, testSpecificVariables)
+				addVCSimTestVariables(clusterProxy, fmt.Sprintf("scale-%s", clusterName), testSpecificIPAddressClaims, testSpecificVariables, false)
 
 				clusterTemplateYAML = bytes.Replace(clusterTemplateYAML, []byte(scaleClusterControlPlaneEndpointIPPlaceholder), []byte(testSpecificVariables["CONTROL_PLANE_ENDPOINT_IP"]), -1)
 				clusterTemplateYAML = bytes.Replace(clusterTemplateYAML, []byte(scaleClusterControlPlaneEndpointPortPlaceholder), []byte(testSpecificVariables["CONTROL_PLANE_ENDPOINT_PORT"]), -1)
