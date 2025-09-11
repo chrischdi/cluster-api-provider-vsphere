@@ -356,7 +356,7 @@ var _ = Describe("VIM based VSphere ClusterReconciler", func() {
 
 		BeforeEach(func() {
 			var err error
-			namespace, err = testEnv.CreateNamespace(ctx, "dz-test")
+			namespace, err = testEnv.CreateNamespaceByPrefix(ctx, "dz-test")
 			Expect(err).NotTo(HaveOccurred())
 
 			capiCluster = &clusterv1.Cluster{

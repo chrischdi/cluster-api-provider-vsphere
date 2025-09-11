@@ -60,7 +60,7 @@ var _ = Describe("VsphereMachineReconciler", func() {
 
 	BeforeEach(func() {
 		var err error
-		testNs, err = testEnv.CreateNamespace(ctx, "vsphere-machine-reconciler")
+		testNs, err = testEnv.CreateNamespaceByPrefix(ctx, "vsphere-machine-reconciler")
 		Expect(err).NotTo(HaveOccurred())
 
 		capiCluster = &clusterv1.Cluster{
@@ -221,7 +221,7 @@ var _ = Describe("VsphereMachineReconciler", func() {
 
 func Test_machineReconciler_Metadata(t *testing.T) {
 	g := NewWithT(t)
-	ns, err := testEnv.CreateNamespace(ctx, "vsphere-machine-reconciler")
+	ns, err := testEnv.CreateNamespaceByPrefix(ctx, "vsphere-machine-reconciler")
 	g.Expect(err).NotTo(HaveOccurred())
 
 	defer func() {

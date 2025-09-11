@@ -297,7 +297,23 @@ func (t *TestEnvironment) CleanupAndWait(ctx context.Context, objs ...client.Obj
 }
 
 // CreateNamespace creates a new namespace in the TestEnvironment.
-func (t *TestEnvironment) CreateNamespace(ctx context.Context, generateName string) (*corev1.Namespace, error) {
+func (t *TestEnvironment) CreateNamespace(ctx context.Context, generateName string) error {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: t.Manager.GetControllerManagerContext().Namespace,
+		},
+	}
+	if err := t.Client.Create(ctx, ns); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// CreateNamespaceByPrefix creates a new namespace with a given prefix in the TestEnvironment.
+func (t *TestEnvironment) CreateNamespaceByPrefix(ctx context.Context, generateName string) (*corev1.Namespace, error) {
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("%s-", generateName),

@@ -239,7 +239,7 @@ var _ = Describe("VSphereDeploymentZoneReconciler", func() {
 
 			BeforeEach(func() {
 				var err error
-				machineNamespace, err = testEnv.CreateNamespace(ctx, "multi-az-test")
+				machineNamespace, err = testEnv.CreateNamespaceByPrefix(ctx, "multi-az-test")
 				Expect(err).NotTo(HaveOccurred())
 			})
 

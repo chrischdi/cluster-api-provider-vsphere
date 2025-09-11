@@ -141,6 +141,11 @@ func setup() {
 	if err := testEnv.Create(ctx, ns); err != nil {
 		panic("unable to create controller namespace")
 	}
+
+	// In case a custom POD_NAMESPACE was set, the namespace might not exist yet.
+	if testEnv.Manager.GetControllerManagerContext().Namespace != manager.DefaultPodNamespace {
+		testEnv.CreateNamespace(ctx, testEnv.Manager.GetControllerManagerContext().Namespace)
+	}
 }
 
 func teardown() {

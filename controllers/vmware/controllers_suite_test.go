@@ -135,6 +135,11 @@ func setup(ctx context.Context) (*helpers.TestEnvironment, clustercache.ClusterC
 		panic(fmt.Sprintf("unable to create controller namespace: %v", err))
 	}
 
+	// In case a custom POD_NAMESPACE was set, the namespace might not exist yet.
+	if testEnv.Manager.GetControllerManagerContext().Namespace != manager.DefaultPodNamespace {
+		testEnv.CreateNamespace(ctx, testEnv.Manager.GetControllerManagerContext().Namespace)
+	}
+
 	return testEnv, clusterCache
 }
 
